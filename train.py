@@ -46,7 +46,7 @@ DATASET_OVERRIDES: Dict[str, object] = {
 }
 
 MODEL_OVERRIDES: Dict[str, object] = {
-    "d_model": 128,
+    "d_model": 96,
     "n_heads": 8,
     "e_layers": 2,
     "d_ff": 128,
