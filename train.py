@@ -315,7 +315,7 @@ class CANPatchBlock(nn.Module):
                 groups=dim,
                 bias=False,
             ),
-            nn.BatchNorm1d(dim),
+            LayerNorm1dChannels(dim),
             nn.SiLU(),
         )
         self.use_context_pyramid = use_context_pyramid
@@ -331,7 +331,7 @@ class CANPatchBlock(nn.Module):
                     groups=dim,
                     bias=False,
                 ),
-                nn.BatchNorm1d(dim),
+                LayerNorm1dChannels(dim),
                 nn.SiLU(),
             )
             self.context_coarse_proj = nn.Conv1d(dim, dim, kernel_size=1, bias=False)
