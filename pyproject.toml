@@ -1,0 +1,16 @@
+[project]
+name = "ts-can-autoresearch"
+version = "0.1.0"
+description = "TS-CAN with an autoresearch-compatible training harness"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "matplotlib>=3.7",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scikit-learn>=1.3",
+    "torch>=2.3",
+]
+
+[tool.uv]
+package = false

@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+
+checkpoints/
+results/
+test_results/
+ablation_outputs/
+result_long_term_forecast.txt
+
+dataset/
+logs/
+results.tsv
+run.log
