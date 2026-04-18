@@ -33,7 +33,7 @@ from prepare import (
 
 SEED = 2
 USE_AMP = True
-USE_TORCH_COMPILE = False
+USE_TORCH_COMPILE = True
 
 DATASET_OVERRIDES: Dict[str, object] = {
     "data": "ETTh1",
