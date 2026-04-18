@@ -492,12 +492,21 @@ class ForecastModel(nn.Module):
         self.final_norm = nn.LayerNorm(configs.d_model)
         head_nf = configs.d_model * patch_num
         self.head = FlattenHead(self.enc_in, head_nf, self.pred_len, head_dropout=configs.dropout)
+        self.linear_skip = nn.Linear(self.seq_len, self.pred_len)
+        self._init_linear_skip()
+
+    def _init_linear_skip(self) -> None:
+        with torch.no_grad():
+            self.linear_skip.weight.zero_()
+            self.linear_skip.bias.zero_()
+            self.linear_skip.weight[:, -1] = 1.0
 
     def forecast(self, x_enc: torch.Tensor) -> torch.Tensor:
         means = x_enc.mean(1, keepdim=True).detach()
         x_enc = x_enc - means
         stdev = torch.sqrt(torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
         x_enc = x_enc / stdev
+        linear_skip = self.linear_skip(x_enc.transpose(1, 2)).transpose(1, 2)
 
         x_enc = x_enc.permute(0, 2, 1)
         enc_out, n_vars = self.patch_embedding(x_enc)
@@ -509,6 +518,7 @@ class ForecastModel(nn.Module):
         enc_out = self.final_norm(enc_out.transpose(1, 2)).transpose(1, 2)
         enc_out = torch.reshape(enc_out, (-1, n_vars, enc_out.shape[1], enc_out.shape[2]))
         dec_out = self.head(enc_out).permute(0, 2, 1)
+        dec_out = dec_out + linear_skip
         dec_out = dec_out * stdev[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1)
         dec_out = dec_out + means[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1)
         return dec_out
