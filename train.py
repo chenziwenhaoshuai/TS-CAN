@@ -75,7 +75,7 @@ GRAD_CLIP_NORM: Optional[float] = None
 
 BATCH_SIZE = 8
 NUM_WORKERS = 0
-WARMUP_RATIO = 0.02
+WARMUP_RATIO = 0.05
 MIN_LR_SCALE = 0.2
 
 # ---------------------------------------------------------------------------
