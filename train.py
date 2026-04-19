@@ -55,7 +55,7 @@ MODEL_OVERRIDES: Dict[str, object] = {
     "can_stride": 8,
     "can_shifts": "1,2,4,8,16",
     "can_cli_mode": "full",
-    "can_temporal_cli_mode": "full",
+    "can_temporal_cli_mode": "inner",
     "can_ctx_mode": "diff",
     "can_drop_path": 0.05,
     "can_kernel_size": 3,
