@@ -52,7 +52,7 @@ MODEL_OVERRIDES: Dict[str, object] = {
     "d_ff": 128,
     "dropout": 0.05,
     "patch_len": 16,
-    "can_stride": 10,
+    "can_stride": 8,
     "can_shifts": "1,2,4,8,16",
     "can_cli_mode": "full",
     "can_temporal_cli_mode": "full",
