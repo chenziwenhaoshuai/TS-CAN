@@ -69,7 +69,7 @@ MODEL_OVERRIDES: Dict[str, object] = {
 OPTIMIZER_NAME = "adamw"
 LEARNING_RATE = 3e-4
 WEIGHT_DECAY = 0.01
-BETAS = (0.9, 0.999)
+BETAS = (0.9, 0.98)
 GRAD_ACCUM_STEPS = 1
 GRAD_CLIP_NORM: Optional[float] = None
 
