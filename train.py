@@ -62,7 +62,7 @@ MODEL_OVERRIDES: Dict[str, object] = {
     "can_init_values": 1e-4,
     "can_use_gffng": 1,
     "can_temporal_roll": 1,
-    "can_use_orth": 1,
+    "can_use_orth": 0,
     "can_context_pyramid": 0,
 }
 
