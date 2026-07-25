@@ -39,11 +39,11 @@ def build_parser():
     parser.add_argument("--enc_in", type=int, default=7)
     parser.add_argument("--dec_in", type=int, default=7)
     parser.add_argument("--c_out", type=int, default=7)
-    parser.add_argument("--d_model", type=int, default=128)
+    parser.add_argument("--d_model", type=int, default=192)
     parser.add_argument("--n_heads", type=int, default=8)
     parser.add_argument("--e_layers", type=int, default=2)
     parser.add_argument("--d_layers", type=int, default=1)
-    parser.add_argument("--d_ff", type=int, default=128)
+    parser.add_argument("--d_ff", type=int, default=192)
     parser.add_argument("--moving_avg", type=int, default=25)
     parser.add_argument("--dropout", type=float, default=0.05)
     parser.add_argument("--embed", type=str, default="timeF")
@@ -59,6 +59,7 @@ def build_parser():
     parser.add_argument("--patch_len", type=int, default=16)
     parser.add_argument("--can_stride", type=int, default=8)
     parser.add_argument("--can_shifts", type=str, default="1,2,4,8,16")
+    parser.add_argument("--can_temporal_shifts", type=str, default="")
     parser.add_argument(
         "--can_cli_mode",
         type=str,
@@ -76,21 +77,118 @@ def build_parser():
     parser.add_argument("--can_kernel_size", type=int, default=3)
     parser.add_argument("--can_init_values", type=float, default=1e-5)
     parser.add_argument("--can_use_gffng", type=int, default=1)
+    parser.add_argument(
+        "--can_global_cli_mode",
+        type=str,
+        default="inner",
+        choices=["full", "inner", "wedge", "adaptive"],
+    )
+    parser.add_argument("--can_global_ctx_mode", type=str, default="abs", choices=["diff", "abs"])
+    parser.add_argument("--can_global_shifts", type=str, default="")
     parser.add_argument("--can_temporal_roll", type=int, default=1)
+    parser.add_argument("--can_temporal_circular", type=int, default=0)
     parser.add_argument("--can_beta_init", type=float, default=0.5)
+    parser.add_argument("--can_temporal_beta_init", type=float, default=None)
+    parser.add_argument("--can_global_beta_init", type=float, default=None)
     parser.add_argument("--can_use_orth", type=int, default=0)
-    parser.add_argument("--can_context_pyramid", type=int, default=0)
+    parser.add_argument("--can_context_pyramid", type=int, default=1)
+    parser.add_argument("--can_use_ffn", type=int, default=0)
+    parser.add_argument("--can_cross_var", type=int, default=0)
+    parser.add_argument("--can_cross_var_layers", type=int, default=1)
+    parser.add_argument(
+        "--can_cross_var_context",
+        type=str,
+        default="others_mean",
+        choices=["mean", "others_mean"],
+    )
+    parser.add_argument("--can_cross_var_shifts", type=str, default="1,2,4,8,16")
+    parser.add_argument("--can_var_embed", type=int, default=0)
+    parser.add_argument("--can_time_mark", type=int, default=0)
+    parser.add_argument(
+        "--can_time_mark_mode",
+        type=str,
+        default="flatten",
+        choices=["flatten", "mean"],
+    )
+    parser.add_argument("--can_time_mark_scale_init", type=float, default=1.0)
+    parser.add_argument("--can_linear_residual", type=int, default=0)
+    parser.add_argument(
+        "--can_linear_mode",
+        type=str,
+        default="raw",
+        choices=["raw", "decomp"],
+    )
+    parser.add_argument("--can_linear_individual", type=int, default=0)
+    parser.add_argument("--can_linear_scale_init", type=float, default=0.5)
+    parser.add_argument("--can_periodic_residual", type=int, default=0)
+    parser.add_argument("--can_periods", type=str, default="24")
+    parser.add_argument("--can_periodic_alpha", type=float, default=0.2)
+    parser.add_argument("--can_periodic_learnable", type=int, default=0)
+    parser.add_argument("--can_coarse_var_attn", type=int, default=0)
+    parser.add_argument("--can_coarse_var_levels", type=int, default=3)
+    parser.add_argument("--can_coarse_var_dim", type=int, default=32)
+    parser.add_argument("--can_coarse_var_scale_init", type=float, default=0.1)
+    parser.add_argument(
+        "--can_coarse_var_mode",
+        type=str,
+        default="diff",
+        choices=["abs", "diff"],
+    )
+    parser.add_argument("--can_hierarchical_mixer", type=int, default=0)
+    parser.add_argument("--can_hierarchical_levels", type=int, default=3)
+    parser.add_argument("--can_hierarchical_layers", type=int, default=1)
+    parser.add_argument("--can_hierarchical_dim", type=int, default=64)
+    parser.add_argument("--can_hierarchical_cross_scale_init", type=float, default=0.05)
+    parser.add_argument("--can_hierarchical_fusion_init", type=float, default=0.2)
+    parser.add_argument(
+        "--can_hierarchical_mode",
+        type=str,
+        default="blend",
+        choices=["blend", "residual"],
+    )
+    parser.add_argument("--can_hierarchical_residual_scale_init", type=float, default=1.0)
+    parser.add_argument("--can_periodic_image", type=int, default=0)
+    parser.add_argument("--can_periodic_image_top_k", type=int, default=3)
+    parser.add_argument("--can_periodic_image_dim", type=int, default=32)
+    parser.add_argument("--can_periodic_image_layers", type=int, default=1)
+    parser.add_argument("--can_periodic_image_shifts", type=str, default="1,2,4")
+    parser.add_argument("--can_periodic_image_scale_init", type=float, default=0.0)
+    parser.add_argument("--can_deep_periodic_image", type=int, default=0)
+    parser.add_argument("--can_deep_periodic_top_k", type=int, default=3)
+    parser.add_argument("--can_deep_periodic_layers", type=int, default=1)
+    parser.add_argument("--can_deep_periodic_shifts", type=str, default="1,2,4")
+    parser.add_argument("--can_deep_periodic_scale_init", type=float, default=0.1)
+    parser.add_argument("--can_multiscale_patch_lens", type=str, default="")
+    parser.add_argument("--can_multiscale_stride_ratio", type=float, default=0.5)
+    parser.add_argument("--can_multiscale_main_bias", type=float, default=0.0)
 
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--itr", type=int, default=1)
     parser.add_argument("--train_epochs", type=int, default=2)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--patience", type=int, default=2)
-    parser.add_argument("--learning_rate", type=float, default=3e-4)
+    parser.add_argument("--learning_rate", type=float, default=5e-4)
+    parser.add_argument("--optimizer", type=str, default="adam", choices=["adam", "adamw"])
+    parser.add_argument("--weight_decay", type=float, default=0.0)
+    parser.add_argument("--warmup_epochs", type=int, default=1)
+    parser.add_argument(
+        "--weight_averaging",
+        type=str,
+        default="none",
+        choices=["none", "ema"],
+    )
+    parser.add_argument("--ema_decay", type=float, default=0.995)
+    parser.add_argument("--ema_start_epoch", type=int, default=1)
     parser.add_argument("--des", type=str, default="TSCAN_RELEASE")
     parser.add_argument("--loss", type=str, default="MSE")
-    parser.add_argument("--lradj", type=str, default="cosine", choices=["type1", "type2", "type3", "cosine"])
+    parser.add_argument(
+        "--lradj",
+        type=str,
+        default="cosine",
+        choices=["type1", "type2", "type3", "cosine", "warmup_cosine"],
+    )
     parser.add_argument("--use_amp", action="store_true", default=False)
+    parser.add_argument("--validation_only", type=int, default=0)
     parser.add_argument("--use_dtw", action="store_true", default=False)
 
     parser.add_argument("--use_gpu", action="store_true", default=True)
@@ -155,8 +253,9 @@ if __name__ == "__main__":
             setting = build_setting(args, ii)
             print(f">>>>>>>start training : {setting}>>>>>>>>>>>>>>>>>>>>>>>>>>")
             exp.train(setting)
-            print(f">>>>>>>testing : {setting}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
-            exp.test(setting)
+            if not args.validation_only:
+                print(f">>>>>>>testing : {setting}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
+                exp.test(setting)
             if args.use_gpu and args.device.type == "cuda":
                 torch.cuda.empty_cache()
     else:

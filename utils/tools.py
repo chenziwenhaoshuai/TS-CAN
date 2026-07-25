@@ -9,24 +9,62 @@ import math
 plt.switch_backend('agg')
 
 
-def adjust_learning_rate(optimizer, epoch, args):
-    # lr = args.learning_rate * (0.2 ** (epoch // 2))
-    if args.lradj == 'type1':
-        lr_adjust = {epoch: args.learning_rate * (0.5 ** ((epoch - 1) // 1))}
-    elif args.lradj == 'type2':
+def _scheduled_learning_rate(schedule, base_lr, epoch, args):
+    if schedule == 'type1':
+        return base_lr * (0.5 ** ((epoch - 1) // 1))
+    if schedule == 'type2':
         lr_adjust = {
             2: 5e-5, 4: 1e-5, 6: 5e-6, 8: 1e-6,
             10: 5e-7, 15: 1e-7, 20: 5e-8
         }
-    elif args.lradj == 'type3':
-        lr_adjust = {epoch: args.learning_rate if epoch < 3 else args.learning_rate * (0.9 ** ((epoch - 3) // 1))}
-    elif args.lradj == "cosine":
-        lr_adjust = {epoch: args.learning_rate /2 * (1 + math.cos(epoch / args.train_epochs * math.pi))}
-    if epoch in lr_adjust.keys():
-        lr = lr_adjust[epoch]
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
-        print('Updating learning rate to {}'.format(lr))
+        return lr_adjust.get(epoch)
+    if schedule == 'type3':
+        if epoch < 3:
+            return base_lr
+        return base_lr * (0.9 ** ((epoch - 3) // 1))
+    if schedule == "cosine":
+        return base_lr / 2 * (
+            1 + math.cos(epoch / args.train_epochs * math.pi)
+        )
+    if schedule == "warmup_cosine":
+        warmup_epochs = max(1, int(getattr(args, 'warmup_epochs', 1)))
+        if epoch <= warmup_epochs:
+            return base_lr * epoch / warmup_epochs
+        decay_epochs = max(1, args.train_epochs - warmup_epochs)
+        progress = min(1.0, (epoch - warmup_epochs) / decay_epochs)
+        return base_lr / 2 * (1 + math.cos(progress * math.pi))
+    raise ValueError(f'Unsupported learning-rate schedule: {schedule}')
+
+
+def adjust_learning_rate(optimizer, epoch, args):
+    group_rates = []
+    for index, param_group in enumerate(optimizer.param_groups):
+        schedule = str(param_group.get('lr_schedule', args.lradj))
+        base_lr = float(
+            param_group.get(
+                'base_lr',
+                args.learning_rate * float(param_group.get('lr_scale', 1.0))
+            )
+        )
+        lr = _scheduled_learning_rate(schedule, base_lr, epoch, args)
+        if lr is not None:
+            scale = float(param_group.get('lr_scale', 1.0))
+            if 'base_lr' in param_group:
+                param_group['lr'] = lr
+            else:
+                param_group['lr'] = lr * scale
+        group_rates.append(
+            (
+                param_group.get('group_name', str(index)),
+                param_group['lr'],
+                schedule,
+            )
+        )
+    print(
+        'Updating learning rates (groups: {})'.format(
+            group_rates
+        )
+    )
 
 
 class EarlyStopping:

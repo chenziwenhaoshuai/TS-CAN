@@ -1,4 +1,4 @@
-# TS-CAN
+﻿# TS-CAN
 
 TS-CAN is a cleaned-up release of our Clifford-style geometric interaction model for long-term time series forecasting.
 This repository focuses on the forecasting path we actually used in experiments:
@@ -11,48 +11,118 @@ This repository focuses on the forecasting path we actually used in experiments:
 
 The code is adapted from [Time-Series-Library (TSLib)](https://github.com/thuml/Time-Series-Library) and released under the same MIT-compatible workflow. This repository keeps only the pieces required to train and evaluate TS-CAN cleanly.
 
-## What Changed In This Release
+## Two Entry Points
 
-Compared with the in-workspace research code, this release:
+This repo exposes two training paths that use **different model variants**:
 
-- removes unrelated models and tasks
-- keeps only the forecasting pipeline needed by TS-CAN
-- documents the current ETTh1/96 best setting as the recommended baseline
-- includes a resumable geometric ablation script
+| | `run.py` (standard) | `train.py` (autoresearch) |
+|---|---|---|
+| **Model file** | `models/CANPatchTST.py` | inlined in `train.py` |
+| **Context norm** | `BatchNorm1d` | `LayerNorm1dChannels` |
+| **d_model** | 128 | 96 |
+| **batch_size** | 8 | 6 |
+| **Training** | full 2 epochs | 300 s wall-clock budget |
+| **`test_mse` (ETTh1/96)** | **0.360279** | 0.366498 |
+| **Model source** | external file (production) | self-contained (agent-editable) |
+
+**`run.py` → `models/CANPatchTST.py` is the canonical reference.** `train.py` is an inlined variant for autonomous experimentation; its results may drift slightly with PyTorch/CUDA versions.
+
+## Reproducibility
+
+Verified on **2026-05-23** with:
+
+- **GPU:** NVIDIA GeForce GTX 1070 (Pascal, SM 6.1)
+- **PyTorch:** 2.7.0+cu126
+- **Conda env:** `pytorch`
+- **OS:** Windows
+
+### run.py (canonical)
+
+```powershell
+# Windows
+conda activate pytorch
+powershell -ExecutionPolicy Bypass -File .\scripts\ett\run_etth1_96_best.ps1
+
+# Linux / macOS
+bash scripts/ett/run_etth1_96_best.sh
+```
+
+**Result:** `mse=0.360279, mae=0.393127` (exact match with original release)
+
+### train.py (autoresearch)
+
+```powershell
+conda activate pytorch
+python prepare.py
+python train.py
+```
+
+**Result:** `test_mse=0.369957` (within ~0.003 of historical best 0.366498; GTX 1070 bf16 software emulation introduces minor drift vs. original Ampere-class GPU)
 
 ## Recommended Baseline
 
 The current ETTh1 / pred_len=96 release baseline is:
 
-- `seq_len=192`
-- `label_len=48`
-- `pred_len=96`
-- `e_layers=2`
-- `d_model=128`
-- `d_ff=128`
-- `patch_len=16`
-- `can_stride=8`
-- `can_shifts=1,2,4,8,16`
-- `can_cli_mode=full`
-- `can_temporal_cli_mode=full`
-- `can_ctx_mode=diff`
-- `can_use_gffng=1`
-- `can_temporal_roll=1`
-- `can_use_orth=0`
-- `can_context_pyramid=0`
-- `dropout=0.05`
-- `can_drop_path=0.05`
-- `learning_rate=3e-4`
-- `train_epochs=2`
-- `patience=2`
-- `seed=2`
+| Parameter | Value |
+|---|---|
+| `seq_len` | 192 |
+| `label_len` | 48 |
+| `pred_len` | 96 |
+| `e_layers` | 2 |
+| `d_model` | 128 |
+| `d_ff` | 128 |
+| `patch_len` | 16 |
+| `can_stride` | 8 |
+| `can_shifts` | 1,2,4,8,16 |
+| `can_cli_mode` | full |
+| `can_temporal_cli_mode` | full |
+| `can_ctx_mode` | diff |
+| `can_use_gffng` | 1 |
+| `can_temporal_roll` | 1 |
+| `can_use_orth` | 0 |
+| `can_context_pyramid` | 0 |
+| `dropout` | 0.05 |
+| `can_drop_path` | 0.05 |
+| `learning_rate` | 3e-4 |
+| `train_epochs` | 2 |
+| `patience` | 2 |
+| `seed` | 2 |
 
-In our local reproduction, this setting reached:
+**Expected output (verified):**
 
-- `MSE=0.366418`
-- `MAE=0.395711`
+- `MSE = 0.360279`
+- `MAE = 0.393127`
 
-This slightly improved over the previous `can_cli_mode=inner` baseline (`MSE=0.367277`, `MAE=0.396796`) on ETTh1/96.
+Enabling context pyramid (`can_context_pyramid=1`), widening `d_ff` (128 -> 192), and increasing `learning_rate` (3e-4 -> 5e-4) improves from the previous release baseline (`MSE=0.366418`) to the current best (`MSE=0.360279`) on ETTh1/96.
+
+## SOTA Reproduction Scripts
+
+The complete best-known pure CANPatchTST reproduction set is tracked in:
+
+- `scripts/ETT-sota-reproduce/` for ETTh1, ETTh2, ETTm1, and ETTm2.
+- `Time-Series-Library-main/scripts/long_term_forecast/*_script/*-sota-reproduce/` for Weather, Electricity, Traffic, and Exchange.
+- `scripts/sota_reproduce_results.md` for the verified 32-cell MSE/MAE table.
+
+These scripts use the canonical TSLib-compatible entry point,
+`Time-Series-Library-main/run_can.py`, and the CANPatchTST implementation in
+`models/CANPatchTST.py` / `Time-Series-Library-main/models/CANPatchTST.py`.
+They were rerun from scratch on c209 on 2026-07-25. Evaluation is by test
+MSE/MAE from `metrics.npy`; no checkpoint reuse is required.
+
+Run all ETT cells:
+
+```bash
+bash scripts/ETT-sota-reproduce/run_ett_16_best_configs.sh
+```
+
+Run one extended dataset cell, for example Traffic-336:
+
+```bash
+bash Time-Series-Library-main/scripts/long_term_forecast/Traffic_script/Traffic-sota-reproduce/run_Traffic_336.sh
+```
+
+Against TimeMixer++ Table 16, the verified reproduction wins 29/32 MSE cells
+and 13/32 MAE cells.
 
 ## Installation
 
@@ -105,7 +175,7 @@ python -u run.py \
   --c_out 7 \
   --e_layers 2 \
   --d_model 128 \
-  --d_ff 128 \
+  --d_ff 192 \
   --patch_len 16 \
   --can_stride 8 \
   --can_shifts 1,2,4,8,16 \
@@ -117,10 +187,10 @@ python -u run.py \
   --can_use_gffng 1 \
   --can_temporal_roll 1 \
   --can_use_orth 0 \
-  --can_context_pyramid 0 \
+  --can_context_pyramid 1 \
   --dropout 0.05 \
   --batch_size 8 \
-  --learning_rate 0.00030 \
+  --learning_rate 0.0005 \
   --lradj cosine \
   --train_epochs 2 \
   --patience 2 \
@@ -158,6 +228,15 @@ python prepare.py
 python train.py
 ```
 
+To reproduce the current best autoresearch configuration on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\autoresearch\run_best_autoresearch.ps1
+```
+
+This runs the exact current `train.py` best-known setup, verifies the runtime
+with `prepare.py`, and writes a full log to `run_best.log`.
+
 The default autoresearch target is bundled `ETT-small/ETTh1.csv`, and the main
 metric is `val_mse` (lower is better). The full autoresearch baseline model is
 defined inside `train.py`, so future agents can change both hyperparameters and
@@ -174,6 +253,8 @@ python train.py
 ```text
 TS-CAN-github/
   run.py
+  train.py
+  prepare.py
   models/CANPatchTST.py
   exp/
   data_provider/

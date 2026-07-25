@@ -1,0 +1,14 @@
+dataset,pred_len,historical_winning_mse,timemixerpp_mse,beats_timemixerpp,source_config,source_stage_or_trial,script
+ETTh1,96,0.3606412708759308,0.361,1,s192_ref_ep2_bs8_repeat,etth1_96_ctx_diag,winning_single/run_ETTh1_96.sh
+ETTh1,192,0.40862464904785156,0.416,1,P192C05,UCANP final_train,winning_single/run_ETTh1_192.sh
+ETTh1,336,0.4292033314704895,0.430,1,r84_0022_ETTh1_336,final_etth1_336_focus_r84,winning_single/run_ETTh1_336.sh
+ETTh1,720,0.44899803400039673,0.467,1,R720_D,UCANP2 phase2,winning_single/run_ETTh1_720.sh
+ETTm1,96,0.28574955463409424,0.310,1,P96C05,UCANP full_compare,winning_single/run_ETTm1_96.sh
+ETTm1,192,0.3316590189933777,0.348,1,R192_G,UCANP4 phase4,winning_single/run_ETTm1_192.sh
+ETTm1,336,0.3687710165977478,0.376,1,R336_E,UCANP3 phase3,winning_single/run_ETTm1_336.sh
+ETTm1,720,0.42197197675704956,0.440,1,R720_D,UCANP3 phase3,winning_single/run_ETTm1_720.sh
+ETTm2,96,0.16770903766155243,0.170,1,R96_B,UCANP3 phase3,winning_single/run_ETTm2_96.sh
+ETTm2,192,0.22796592116355896,0.229,1,R192_C,UCANP3 phase3,winning_single/run_ETTm2_192.sh
+ETTm2,336,0.2795296609401703,0.303,1,P336C01,UCANP screening,winning_single/run_ETTm2_336.sh
+ETTm2,720,0.35730502009391785,0.373,1,R720_B,UCANP3 phase3,winning_single/run_ETTm2_720.sh
+ETTh2,720,0.3917418122291565,0.392,1,r68_0006_ETTh2_720,tune_etth2_strict_r68_confirm,winning_single/run_ETTh2_720.sh

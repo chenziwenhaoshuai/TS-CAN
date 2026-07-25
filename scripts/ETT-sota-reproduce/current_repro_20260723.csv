@@ -1,0 +1,13 @@
+dataset,pred_len,seq_len,epochs,patience,mse,mae,timemixerpp_mse,beats_timemixerpp,run_root,metrics_note
+ETTh1,96,192,5,3,0.36097583174705505,0.3942655622959137,0.361,1,Time-Series-Library-main/runs/github_canpatchtst_repro_agents_best_20260723,"From scratch on c209, seed=2, pure CANPatchTST."
+ETTh1,192,192,5,3,0.4117825925350189,0.4224219024181366,0.416,1,Time-Series-Library-main/runs/github_canpatchtst_repro_agents_best_20260723,"From scratch on c209, seed=2, pure CANPatchTST."
+ETTh1,336,336,5,3,0.4308067858219147,0.4354732930660248,0.430,0,Time-Series-Library-main/runs/github_canpatchtst_repro_agents_best_20260723,"From scratch on c209, seed=2, pure CANPatchTST."
+ETTh1,720,336,5,3,0.4919734299182892,0.49370259046554565,0.467,0,Time-Series-Library-main/runs/github_canpatchtst_repro_agents_best_20260723,"From scratch on c209, seed=2, pure CANPatchTST."
+ETTm1,96,192,5,3,0.29981452226638794,0.3488887548446655,0.310,1,Time-Series-Library-main/runs/github_canpatchtst_repro_agents_best_20260723,"From scratch on c209, seed=2, pure CANPatchTST."
+ETTm1,192,192,5,3,0.3349519968032837,0.3702998757362366,0.348,1,Time-Series-Library-main/runs/github_canpatchtst_repro_agents_best_20260723,"From scratch on c209, seed=2, pure CANPatchTST."
+ETTm1,336,192,5,3,0.37886032462120056,0.40312159061431885,0.376,0,Time-Series-Library-main/runs/github_canpatchtst_repro_agents_best_20260723,"From scratch on c209, seed=2, pure CANPatchTST."
+ETTm1,720,192,5,3,0.4261966347694397,0.4287065267562866,0.440,1,Time-Series-Library-main/runs/github_canpatchtst_repro_agents_best_20260723,"From scratch on c209, seed=2, pure CANPatchTST."
+ETTm2,96,192,5,3,0.16827721893787384,0.2532055675983429,0.170,1,Time-Series-Library-main/runs/github_canpatchtst_repro_agents_best_20260723,"From scratch on c209, seed=2, pure CANPatchTST."
+ETTm2,192,192,5,3,0.23061034083366394,0.2958502471446991,0.229,0,Time-Series-Library-main/runs/github_canpatchtst_repro_agents_best_20260723,"From scratch on c209, seed=2, pure CANPatchTST."
+ETTm2,336,192,5,3,0.2876114547252655,0.33542683720588684,0.303,1,Time-Series-Library-main/runs/github_canpatchtst_repro_agents_best_20260723,"From scratch on c209, seed=2, pure CANPatchTST."
+ETTm2,720,192,5,3,0.38079866766929626,0.3920994699001312,0.373,0,Time-Series-Library-main/runs/github_canpatchtst_repro_agents_best_20260723,"From scratch on c209, seed=2, pure CANPatchTST."

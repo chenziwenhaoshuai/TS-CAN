@@ -9,6 +9,7 @@ import os
 import time
 import warnings
 import numpy as np
+import copy
 
 warnings.filterwarnings('ignore')
 
@@ -29,17 +30,431 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         return data_set, data_loader
 
     def _select_optimizer(self):
-        model_optim = optim.Adam(self.model.parameters(), lr=self.args.learning_rate)
+        optimizer_name = str(getattr(self.args, 'optimizer', 'adam')).lower()
+        weight_decay = float(getattr(self.args, 'weight_decay', 0.0))
+        active_model = (
+            self.model.module
+            if isinstance(self.model, nn.DataParallel)
+            else self.model
+        )
+        if hasattr(active_model, 'optimizer_param_groups'):
+            parameters = active_model.optimizer_param_groups(
+                self.args.learning_rate
+            )
+        else:
+            parameters = self.model.parameters()
+        if optimizer_name == 'adamw':
+            model_optim = optim.AdamW(
+                parameters,
+                lr=self.args.learning_rate,
+                weight_decay=weight_decay
+            )
+        elif optimizer_name == 'adam':
+            model_optim = optim.Adam(
+                parameters,
+                lr=self.args.learning_rate,
+                weight_decay=weight_decay
+            )
+        else:
+            raise ValueError(f'Unsupported optimizer: {optimizer_name}')
         return model_optim
+
+    def _compute_weighted_mse_loss(self, outputs, target):
+        residual = outputs - target
+        squared = residual ** 2
+        horizon_weight = float(
+            getattr(self.args, 'loss_horizon_weight', 1.0)
+        )
+        horizon_start = int(
+            getattr(self.args, 'loss_horizon_weight_start', 0)
+        )
+        if horizon_weight != 1.0 and horizon_start < squared.shape[1]:
+            weights = torch.ones(
+                squared.shape[1],
+                device=squared.device,
+                dtype=squared.dtype
+            )
+            start = max(0, horizon_start)
+            horizon_mode = str(
+                getattr(self.args, 'loss_horizon_weight_mode', 'step')
+            ).lower()
+            if horizon_mode == 'ramp':
+                tail = squared.shape[1] - start
+                ramp = torch.linspace(
+                    1.0,
+                    horizon_weight,
+                    tail,
+                    device=squared.device,
+                    dtype=squared.dtype
+                )
+                weights[start:] = ramp
+            elif horizon_mode == 'step':
+                weights[start:] = horizon_weight
+            else:
+                raise ValueError(
+                    f'Unsupported loss_horizon_weight_mode: {horizon_mode}'
+                )
+            squared = squared * weights.view(1, -1, 1)
+
+        variable_weights = str(
+            getattr(self.args, 'loss_variable_weights', '') or ''
+        ).strip()
+        if variable_weights:
+            values = [
+                float(item.strip())
+                for item in variable_weights.split(',')
+                if item.strip()
+            ]
+            if values:
+                if len(values) != squared.shape[-1]:
+                    raise ValueError(
+                        'loss_variable_weights length must match output '
+                        f'channels: got {len(values)} vs {squared.shape[-1]}'
+                    )
+                weights = torch.tensor(
+                    values,
+                    device=squared.device,
+                    dtype=squared.dtype
+                )
+                squared = squared * weights.view(1, 1, -1)
+
+        volatility_weight = float(
+            getattr(self.args, 'loss_volatility_weight', 0.0)
+        )
+        if volatility_weight > 0.0:
+            target_std = target.detach().std(
+                dim=1,
+                keepdim=True,
+                unbiased=False
+            ).mean(dim=2, keepdim=True)
+            normalized_std = target_std / (
+                target_std.mean().detach() + 1e-6
+            )
+            squared = squared * (1.0 + volatility_weight * normalized_std)
+
+        level_weight = float(
+            getattr(self.args, 'loss_level_weight', 0.0)
+        )
+        if level_weight > 0.0:
+            target_level = target.detach().abs().mean(
+                dim=1,
+                keepdim=True
+            ).mean(dim=2, keepdim=True)
+            normalized_level = target_level / (
+                target_level.mean().detach() + 1e-6
+            )
+            squared = squared * (1.0 + level_weight * normalized_level)
+
+        hard_weight = float(
+            getattr(self.args, 'loss_tail_hard_weight', 0.0)
+        )
+        if hard_weight > 0.0:
+            hard_start = int(
+                getattr(
+                    self.args,
+                    'loss_tail_hard_start',
+                    getattr(self.args, 'loss_horizon_weight_start', 0)
+                )
+            )
+            hard_start = max(0, min(hard_start, squared.shape[1] - 1))
+            hard_power = float(
+                getattr(self.args, 'loss_tail_hard_power', 1.0)
+            )
+            hard_clip = float(
+                getattr(self.args, 'loss_tail_hard_clip', 3.0)
+            )
+            sample_error = squared.detach()[:, hard_start:, :].mean(
+                dim=(1, 2),
+                keepdim=True
+            )
+            normalized_error = sample_error / (
+                sample_error.mean().detach() + 1e-6
+            )
+            if hard_power != 1.0:
+                normalized_error = normalized_error.clamp_min(1e-6).pow(
+                    hard_power
+                )
+            if hard_clip > 0.0:
+                normalized_error = normalized_error.clamp(max=hard_clip)
+            hard_weights = torch.ones_like(squared)
+            hard_weights[:, hard_start:, :] = (
+                1.0 + hard_weight * normalized_error
+            )
+            squared = squared * hard_weights
+
+        loss = squared.mean()
+
+        lowpass_weight = float(
+            getattr(self.args, 'loss_tail_lowpass_weight', 0.0)
+        )
+        if lowpass_weight > 0.0:
+            lowpass_start = int(
+                getattr(
+                    self.args,
+                    'loss_tail_lowpass_start',
+                    getattr(self.args, 'loss_horizon_weight_start', 0)
+                )
+            )
+            lowpass_start = max(0, min(lowpass_start, residual.shape[1] - 1))
+            kernel = int(
+                getattr(self.args, 'loss_tail_lowpass_kernel', 9)
+            )
+            kernel = max(1, kernel)
+            if kernel % 2 == 0:
+                kernel += 1
+            pred_tail = outputs[:, lowpass_start:, :].transpose(1, 2)
+            target_tail = target.detach()[:, lowpass_start:, :].transpose(1, 2)
+            if kernel > 1:
+                padding = kernel // 2
+                pred_tail = torch.nn.functional.avg_pool1d(
+                    torch.nn.functional.pad(
+                        pred_tail,
+                        (padding, padding),
+                        mode='replicate'
+                    ),
+                    kernel_size=kernel,
+                    stride=1
+                )
+                target_tail = torch.nn.functional.avg_pool1d(
+                    torch.nn.functional.pad(
+                        target_tail,
+                        (padding, padding),
+                        mode='replicate'
+                    ),
+                    kernel_size=kernel,
+                    stride=1
+                )
+            lowpass_loss = (pred_tail - target_tail).pow(2)
+            lowpass_variables = str(
+                getattr(self.args, 'loss_tail_lowpass_variables', '') or ''
+            ).strip()
+            if lowpass_variables:
+                values = [
+                    float(item.strip())
+                    for item in lowpass_variables.split(',')
+                    if item.strip()
+                ]
+                if values:
+                    if len(values) != lowpass_loss.shape[1]:
+                        raise ValueError(
+                            'loss_tail_lowpass_variables length must match '
+                            f'output channels: got {len(values)} vs '
+                            f'{lowpass_loss.shape[1]}'
+                        )
+                    weights = torch.tensor(
+                        values,
+                        device=lowpass_loss.device,
+                        dtype=lowpass_loss.dtype
+                    )
+                    lowpass_loss = lowpass_loss * weights.view(1, -1, 1)
+            loss = loss + lowpass_weight * lowpass_loss.mean()
+
+        tail_bias_weight = float(
+            getattr(self.args, 'loss_tail_bias_weight', 0.0)
+        )
+        if tail_bias_weight > 0.0:
+            tail_bias_start = int(
+                getattr(
+                    self.args,
+                    'loss_tail_bias_start',
+                    getattr(self.args, 'loss_horizon_weight_start', 0)
+                )
+            )
+            tail_bias_start = max(
+                0,
+                min(tail_bias_start, residual.shape[1] - 1)
+            )
+            tail_bias = residual[:, tail_bias_start:, :].mean(dim=(0, 1))
+            bias_loss = tail_bias.pow(2)
+            tail_bias_variables = str(
+                getattr(self.args, 'loss_tail_bias_variables', '') or ''
+            ).strip()
+            if tail_bias_variables:
+                values = [
+                    float(item.strip())
+                    for item in tail_bias_variables.split(',')
+                    if item.strip()
+                ]
+                if values:
+                    if len(values) != bias_loss.shape[-1]:
+                        raise ValueError(
+                            'loss_tail_bias_variables length must match '
+                            f'output channels: got {len(values)} vs '
+                            f'{bias_loss.shape[-1]}'
+                        )
+                    weights = torch.tensor(
+                        values,
+                        device=bias_loss.device,
+                        dtype=bias_loss.dtype
+                    )
+                    bias_loss = bias_loss * weights
+            loss = loss + tail_bias_weight * bias_loss.mean()
+
+        tail_level_weight = float(
+            getattr(self.args, 'loss_tail_level_weight', 0.0)
+        )
+        if tail_level_weight > 0.0:
+            tail_level_start = int(
+                getattr(
+                    self.args,
+                    'loss_tail_level_start',
+                    getattr(self.args, 'loss_horizon_weight_start', 0)
+                )
+            )
+            tail_level_start = max(
+                0,
+                min(tail_level_start, residual.shape[1] - 1)
+            )
+            pred_level = outputs[:, tail_level_start:, :].mean(dim=1)
+            target_level = target.detach()[:, tail_level_start:, :].mean(dim=1)
+            level_loss = (pred_level - target_level).pow(2)
+            tail_level_variables = str(
+                getattr(self.args, 'loss_tail_level_variables', '') or ''
+            ).strip()
+            if tail_level_variables:
+                values = [
+                    float(item.strip())
+                    for item in tail_level_variables.split(',')
+                    if item.strip()
+                ]
+                if values:
+                    if len(values) != level_loss.shape[-1]:
+                        raise ValueError(
+                            'loss_tail_level_variables length must match '
+                            f'output channels: got {len(values)} vs '
+                            f'{level_loss.shape[-1]}'
+                        )
+                    weights = torch.tensor(
+                        values,
+                        device=level_loss.device,
+                        dtype=level_loss.dtype
+                    )
+                    level_loss = level_loss * weights.view(1, -1)
+            loss = loss + tail_level_weight * level_loss.mean()
+
+        variance_weight = float(
+            getattr(self.args, 'loss_variance_weight', 0.0)
+        )
+        if variance_weight > 0.0:
+            pred_std = outputs.std(dim=1, unbiased=False)
+            target_std = target.detach().std(dim=1, unbiased=False)
+            std_loss = (pred_std - target_std).pow(2).mean()
+            loss = loss + variance_weight * std_loss
+
+        range_weight = float(
+            getattr(self.args, 'loss_range_weight', 0.0)
+        )
+        if range_weight > 0.0:
+            pred_range = outputs.amax(dim=1) - outputs.amin(dim=1)
+            target_range = target.detach().amax(dim=1) - target.detach().amin(dim=1)
+            range_loss = (pred_range - target_range).pow(2).mean()
+            loss = loss + range_weight * range_loss
+
+        return loss
+
+    def _compute_training_loss(self, outputs, target, criterion):
+        active_model = (
+            self.model.module
+            if isinstance(self.model, nn.DataParallel)
+            else self.model
+        )
+        if hasattr(active_model, 'compute_training_loss'):
+            active_model._external_training_loss_fn = (
+                lambda prediction, truth: self._compute_weighted_mse_loss(
+                    prediction,
+                    truth
+                )
+            )
+            try:
+                return active_model.compute_training_loss(
+                    outputs,
+                    target,
+                    criterion
+                )
+            finally:
+                if hasattr(active_model, '_external_training_loss_fn'):
+                    delattr(active_model, '_external_training_loss_fn')
+        if (
+            float(getattr(self.args, 'loss_horizon_weight', 1.0)) != 1.0
+            or float(getattr(self.args, 'loss_volatility_weight', 0.0)) > 0.0
+            or float(getattr(self.args, 'loss_level_weight', 0.0)) > 0.0
+            or float(getattr(self.args, 'loss_variance_weight', 0.0)) > 0.0
+            or float(getattr(self.args, 'loss_range_weight', 0.0)) > 0.0
+            or float(getattr(self.args, 'loss_tail_bias_weight', 0.0)) > 0.0
+            or float(getattr(self.args, 'loss_tail_level_weight', 0.0)) > 0.0
+            or float(getattr(self.args, 'loss_tail_hard_weight', 0.0)) > 0.0
+            or float(getattr(self.args, 'loss_tail_lowpass_weight', 0.0)) > 0.0
+            or bool(str(getattr(self.args, 'loss_variable_weights', '') or '').strip())
+        ):
+            return self._compute_weighted_mse_loss(outputs, target)
+        return criterion(outputs, target)
+
+    def _compute_consistency_loss(self, outputs, aux_outputs):
+        start = int(
+            getattr(
+                self.args,
+                'loss_consistency_start',
+                getattr(self.args, 'loss_horizon_weight_start', 0)
+            )
+        )
+        start = max(0, min(start, outputs.shape[1] - 1))
+        diff = (
+            outputs[:, start:, :] - aux_outputs[:, start:, :].detach()
+        ).pow(2)
+        variable_weights = str(
+            getattr(self.args, 'loss_consistency_variables', '') or ''
+        ).strip()
+        if variable_weights:
+            values = [
+                float(item.strip())
+                for item in variable_weights.split(',')
+                if item.strip()
+            ]
+            if values:
+                if len(values) != diff.shape[-1]:
+                    raise ValueError(
+                        'loss_consistency_variables length must match '
+                        f'output channels: got {len(values)} vs '
+                        f'{diff.shape[-1]}'
+                    )
+                weights = torch.tensor(
+                    values,
+                    device=diff.device,
+                    dtype=diff.dtype
+                )
+                diff = diff * weights.view(1, 1, -1)
+        return diff.mean()
 
     def _select_criterion(self):
         criterion = nn.MSELoss()
         return criterion
+
+    def _validation_metric_loss(self, pred, true, criterion):
+        mode = str(getattr(self.args, 'vali_metric_mode', 'all')).lower()
+        if mode == 'all':
+            return criterion(pred, true), true.numel()
+        if mode == 'tail':
+            start = int(
+                getattr(
+                    self.args,
+                    'vali_metric_horizon_start',
+                    getattr(self.args, 'loss_horizon_weight_start', 0)
+                )
+            )
+            start = max(0, min(start, true.shape[1] - 1))
+            pred = pred[:, start:, :]
+            true = true[:, start:, :]
+            return criterion(pred, true), true.numel()
+        if mode == 'weighted':
+            return self._compute_weighted_mse_loss(pred, true), true.numel()
+        raise ValueError(f'Unsupported vali_metric_mode: {mode}')
  
 
-    def vali(self, vali_data, vali_loader, criterion):
-        total_loss = []
-        self.model.eval()
+    def vali(self, vali_data, vali_loader, criterion, model=None):
+        active_model = self.model if model is None else model
+        total_loss = 0.0
+        total_elements = 0
+        active_model.eval()
         with torch.no_grad():
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(vali_loader):
                 batch_x = batch_x.float().to(self.device)
@@ -54,9 +469,9 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 # encoder - decoder
                 if self.args.use_amp and self.device.type == 'cuda':
                     with torch.cuda.amp.autocast():
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        outputs = active_model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 else:
-                    outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                    outputs = active_model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
                 batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
@@ -64,17 +479,41 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 pred = outputs.detach()
                 true = batch_y.detach()
 
-                loss = criterion(pred, true)
+                loss, elements = self._validation_metric_loss(
+                    pred,
+                    true,
+                    criterion
+                )
 
-                total_loss.append(loss.item())
-        total_loss = np.average(total_loss)
-        self.model.train()
+                total_loss += loss.item() * elements
+                total_elements += elements
+        total_loss = total_loss / max(1, total_elements)
+        active_model.train()
         return total_loss
+
+    @staticmethod
+    def _update_ema_model(ema_model, model, decay):
+        with torch.no_grad():
+            ema_parameters = dict(ema_model.named_parameters())
+            model_parameters = dict(model.named_parameters())
+            for name, ema_parameter in ema_parameters.items():
+                model_parameter = model_parameters[name].detach()
+                ema_parameter.mul_(decay).add_(
+                    model_parameter,
+                    alpha=1.0 - decay
+                )
+
+            ema_buffers = dict(ema_model.named_buffers())
+            model_buffers = dict(model.named_buffers())
+            for name, ema_buffer in ema_buffers.items():
+                ema_buffer.copy_(model_buffers[name].detach())
 
     def train(self, setting):
         train_data, train_loader = self._get_data(flag='train')
         vali_data, vali_loader = self._get_data(flag='val')
-        test_data, test_loader = self._get_data(flag='test')
+        validation_only = bool(getattr(self.args, 'validation_only', 0))
+        if not validation_only:
+            test_data, test_loader = self._get_data(flag='test')
 
         path = os.path.join(self.args.checkpoints, setting)
         if not os.path.exists(path):
@@ -87,11 +526,39 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
         model_optim = self._select_optimizer()
         criterion = self._select_criterion()
+        weight_averaging = str(
+            getattr(self.args, 'weight_averaging', 'none')
+        ).lower()
+        if weight_averaging not in {'none', 'ema'}:
+            raise ValueError(
+                f'Unsupported weight averaging mode: {weight_averaging}'
+            )
+        ema_model = None
+        ema_decay = float(getattr(self.args, 'ema_decay', 0.995))
+        ema_start_epoch = max(1, int(getattr(self.args, 'ema_start_epoch', 1)))
+        if weight_averaging == 'ema':
+            if not 0.0 < ema_decay < 1.0:
+                raise ValueError('ema_decay must be between 0 and 1.')
+            ema_model = copy.deepcopy(self.model)
+            ema_model.requires_grad_(False)
 
         if self.args.use_amp and self.device.type == 'cuda':
             scaler = torch.cuda.amp.GradScaler()
 
+        max_train_steps = max(
+            0,
+            int(getattr(self.args, 'max_train_steps', 0))
+        )
+        stop_after_epochs = max(
+            0,
+            int(getattr(self.args, 'stop_after_epochs', 0))
+        )
+        global_train_step = 0
+        step_budget_reached = False
+
         for epoch in range(self.args.train_epochs):
+            if self.args.lradj == 'warmup_cosine':
+                adjust_learning_rate(model_optim, epoch + 1, self.args)
             iter_count = 0
             train_loss = []
 
@@ -117,7 +584,34 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         f_dim = -1 if self.args.features == 'MS' else 0
                         outputs = outputs[:, -self.args.pred_len:, f_dim:]
                         batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
-                        loss = criterion(outputs, batch_y)
+                        loss = self._compute_training_loss(
+                            outputs,
+                            batch_y,
+                            criterion
+                        )
+                        consistency_weight = float(
+                            getattr(self.args, 'loss_consistency_weight', 0.0)
+                        )
+                        active_model = (
+                            self.model.module
+                            if isinstance(self.model, nn.DataParallel)
+                            else self.model
+                        )
+                        if (
+                            consistency_weight > 0.0
+                            and hasattr(active_model, 'consistency_forward')
+                        ):
+                            aux_outputs = active_model.consistency_forward(
+                                batch_x,
+                                batch_x_mark,
+                                dec_inp,
+                                batch_y_mark
+                            )
+                            aux_outputs = aux_outputs[:, -self.args.pred_len:, f_dim:]
+                            loss = loss + consistency_weight * self._compute_consistency_loss(
+                                outputs,
+                                aux_outputs
+                            )
                         train_loss.append(loss.item())
                 else:
                     outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
@@ -125,7 +619,34 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     f_dim = -1 if self.args.features == 'MS' else 0
                     outputs = outputs[:, -self.args.pred_len:, f_dim:]
                     batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
-                    loss = criterion(outputs, batch_y)
+                    loss = self._compute_training_loss(
+                        outputs,
+                        batch_y,
+                        criterion
+                    )
+                    consistency_weight = float(
+                        getattr(self.args, 'loss_consistency_weight', 0.0)
+                    )
+                    active_model = (
+                        self.model.module
+                        if isinstance(self.model, nn.DataParallel)
+                        else self.model
+                    )
+                    if (
+                        consistency_weight > 0.0
+                        and hasattr(active_model, 'consistency_forward')
+                    ):
+                        aux_outputs = active_model.consistency_forward(
+                            batch_x,
+                            batch_x_mark,
+                            dec_inp,
+                            batch_y_mark
+                        )
+                        aux_outputs = aux_outputs[:, -self.args.pred_len:, f_dim:]
+                        loss = loss + consistency_weight * self._compute_consistency_loss(
+                            outputs,
+                            aux_outputs
+                        )
                     train_loss.append(loss.item())
 
                 if (i + 1) % 100 == 0:
@@ -143,20 +664,112 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 else:
                     loss.backward()
                     model_optim.step()
+                if ema_model is not None:
+                    if epoch + 1 < ema_start_epoch:
+                        ema_model.load_state_dict(self.model.state_dict())
+                    else:
+                        self._update_ema_model(
+                            ema_model,
+                            self.model,
+                            ema_decay
+                        )
+
+                global_train_step += 1
+                if (
+                    max_train_steps > 0
+                    and global_train_step >= max_train_steps
+                ):
+                    checkpoint_model = (
+                        ema_model if ema_model is not None else self.model
+                    )
+                    torch.save(
+                        checkpoint_model.state_dict(),
+                        os.path.join(path, 'checkpoint.pth')
+                    )
+                    print(
+                        'Reached max_train_steps={} at epoch={} batch={}. '
+                        'Saving current model.'.format(
+                            max_train_steps,
+                            epoch + 1,
+                            i + 1
+                        )
+                    )
+                    step_budget_reached = True
+                    break
+
+            if step_budget_reached:
+                break
 
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
             train_loss = np.average(train_loss)
-            vali_loss = self.vali(vali_data, vali_loader, criterion)
-            test_loss = self.vali(test_data, test_loader, criterion)
-
-            print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
-                epoch + 1, train_steps, train_loss, vali_loss, test_loss))
-            early_stopping(vali_loss, self.model, path)
+            raw_vali_loss = self.vali(
+                vali_data,
+                vali_loader,
+                criterion
+            )
+            if ema_model is not None:
+                ema_vali_loss = self.vali(
+                    vali_data,
+                    vali_loader,
+                    criterion,
+                    model=ema_model
+                )
+                vali_loss = ema_vali_loss
+            else:
+                ema_vali_loss = None
+                vali_loss = raw_vali_loss
+            if validation_only:
+                message = (
+                    "Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} "
+                    "Vali Loss: {3:.7f}"
+                ).format(epoch + 1, train_steps, train_loss, vali_loss)
+                if ema_vali_loss is not None:
+                    message += (
+                        " Raw Vali Loss: {0:.7f} EMA Vali Loss: {1:.7f}"
+                    ).format(raw_vali_loss, ema_vali_loss)
+                print(message)
+            else:
+                test_loss = self.vali(test_data, test_loader, criterion)
+                print(
+                    "Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} "
+                    "Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
+                        epoch + 1,
+                        train_steps,
+                        train_loss,
+                        vali_loss,
+                        test_loss
+                    )
+                )
+            checkpoint_model = ema_model if ema_model is not None else self.model
+            if bool(getattr(self.args, 'save_epoch_checkpoints', 0)):
+                save_epoch_start = max(
+                    1,
+                    int(getattr(self.args, 'save_epoch_start', 1))
+                )
+                if epoch + 1 >= save_epoch_start:
+                    torch.save(
+                        checkpoint_model.state_dict(),
+                        os.path.join(
+                            path,
+                            'epoch_{:03d}.pth'.format(epoch + 1)
+                        )
+                    )
+            early_stopping(vali_loss, checkpoint_model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
                 break
 
-            adjust_learning_rate(model_optim, epoch + 1, self.args)
+            if stop_after_epochs > 0 and epoch + 1 >= stop_after_epochs:
+                print(
+                    'Reached stop_after_epochs={}. '
+                    'Stopping after epoch evaluation.'.format(
+                        stop_after_epochs
+                    )
+                )
+                break
+
+            if self.args.lradj != 'warmup_cosine':
+                adjust_learning_rate(model_optim, epoch + 1, self.args)
 
         best_model_path = path + '/' + 'checkpoint.pth'
         self.model.load_state_dict(torch.load(best_model_path, map_location=self.device))
@@ -168,7 +781,29 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         if test:
             print('loading model')
             ckpt_path = os.path.join(self.args.checkpoints, setting, 'checkpoint.pth')
-            self.model.load_state_dict(torch.load(ckpt_path, map_location=self.device))
+            strict = bool(int(getattr(self.args, 'strict_checkpoint', 1)))
+            state = torch.load(ckpt_path, map_location=self.device)
+            if strict:
+                self.model.load_state_dict(state)
+            else:
+                current = self.model.state_dict()
+                filtered_state = {
+                    key: value
+                    for key, value in state.items()
+                    if key in current and current[key].shape == value.shape
+                }
+                skipped = sorted(set(state) - set(filtered_state))
+                load_result = self.model.load_state_dict(
+                    filtered_state,
+                    strict=False
+                )
+                print(
+                    'non-strict checkpoint load | missing: {} unexpected: {} skipped: {}'.format(
+                        list(load_result.missing_keys),
+                        list(load_result.unexpected_keys),
+                        skipped
+                    )
+                )
 
         preds = []
         trues = []

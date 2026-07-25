@@ -1,0 +1,13 @@
+dataset,pred_len,historical_mse,current_rerun_mse,timemixerpp_mse,historical_value_found,current_script_available,current_rerun_beats_timemixerpp,current_rerun_matches_or_improves_historical,status
+ETTh1,96,0.360641,0.36097583174705505,0.361,1,1,1,0,"Historical value found; current pure CANPatchTST rerun still beats TimeMixer++ but is slightly worse than historical."
+ETTh1,192,0.415586,0.4117825925350189,0.416,1,1,1,1,"Historical value found; current pure CANPatchTST rerun improves historical value and beats TimeMixer++."
+ETTh1,336,0.429443,0.4308067858219147,0.430,1,1,0,0,"Historical value found; current same-family script does not reproduce the historical win."
+ETTh1,720,0.462989,0.4919734299182892,0.467,1,1,0,0,"Historical value found; current same-family script does not reproduce the historical win."
+ETTm1,96,0.299,0.29981452226638794,0.310,1,1,1,0,"Historical value found; current pure CANPatchTST rerun still beats TimeMixer++."
+ETTm1,192,0.335,0.3349519968032837,0.348,1,1,1,1,"Historical value found; current pure CANPatchTST rerun matches/improves historical rounded value and beats TimeMixer++."
+ETTm1,336,0.365,0.37886032462120056,0.376,1,1,0,0,"Historical value found; current same-family script does not reproduce the historical win."
+ETTm1,720,0.421,0.4261966347694397,0.440,1,1,1,0,"Historical value found; current pure CANPatchTST rerun still beats TimeMixer++ but is worse than historical."
+ETTm2,96,0.168277,0.16827721893787384,0.170,1,1,1,0,"Historical value found; current rerun effectively matches the historical value and beats TimeMixer++."
+ETTm2,192,0.225283,0.23061034083366394,0.229,1,1,0,0,"Historical value found; current same-family script does not reproduce the historical win."
+ETTm2,336,0.291013,0.2876114547252655,0.303,1,1,1,1,"Historical value found; current pure CANPatchTST rerun improves historical value and beats TimeMixer++."
+ETTm2,720,0.371113,0.38079866766929626,0.373,1,1,0,0,"Historical value found; current same-family script does not reproduce the historical win."
