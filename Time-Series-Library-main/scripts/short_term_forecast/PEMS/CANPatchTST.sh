@@ -1,64 +1,131 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 
 model_name=CANPatchTST
 seq_len=96
 pred_len=12
-learning_rate=0.003
-d_model=128
-d_ff=256
-train_epochs=10
-patience=10
 
-run_pems() {
-  local dataset="$1"
-  local enc_in="$2"
-  local batch_size="$3"
-  python -u run.py \
-    --task_name long_term_forecast \
-    --is_training 1 \
-    --root_path ./dataset/PEMS/ \
-    --data_path "${dataset}.npz" \
-    --model_id "$dataset" \
-    --model "$model_name" \
-    --data PEMS \
-    --features M \
-    --seq_len "$seq_len" \
-    --label_len 0 \
-    --pred_len "$pred_len" \
-    --e_layers 5 \
-    --d_layers 1 \
-    --factor 3 \
-    --enc_in "$enc_in" \
-    --dec_in "$enc_in" \
-    --c_out "$enc_in" \
-    --des CAN_short \
-    --itr 1 \
-    --use_norm 0 \
-    --channel_independence 0 \
-    --d_model "$d_model" \
-    --d_ff "$d_ff" \
-    --patch_len 16 \
-    --can_stride 8 \
-    --can_shifts 1,2,4,8,16 \
-    --can_cli_mode full \
-    --can_temporal_cli_mode full \
-    --can_temporal_roll 1 \
-    --can_context_pyramid 1 \
-    --can_use_gffng 1 \
-    --can_drop_path 0.05 \
-    --dropout 0.05 \
-    --batch_size "$batch_size" \
-    --learning_rate "$learning_rate" \
-    --train_epochs "$train_epochs" \
-    --patience "$patience" \
-    --lradj type1 \
-    --num_workers 0
-}
+python -u run.py \
+  --task_name long_term_forecast \
+  --is_training 1 \
+  --root_path ./dataset/PEMS/ \
+  --data_path PEMS03.npz \
+  --model_id PEMS03 \
+  --model $model_name \
+  --data PEMS \
+  --features M \
+  --seq_len $seq_len \
+  --label_len 0 \
+  --pred_len $pred_len \
+  --e_layers 3 \
+  --d_layers 1 \
+  --factor 3 \
+  --enc_in 358 \
+  --dec_in 358 \
+  --c_out 358 \
+  --use_norm 0 \
+  --channel_independence 0 \
+  --d_model 64 \
+  --d_ff 128 \
+  --patch_len 12 \
+  --can_stride 6 \
+  --can_shifts 1,2,4,8 \
+  --can_cli_mode inner \
+  --can_temporal_cli_mode inner \
+  --can_context_pyramid 0 \
+  --can_multiscale_patch_lens 8,16 \
+  --can_multiscale_main_bias 0.50 \
+  --can_cross_var 1 \
+  --can_cross_var_layers 1 \
+  --can_cross_var_context others_mean \
+  --can_cross_var_shifts 1,2,4,8,16 \
+  --can_temporal_roll 1 \
+  --can_use_gffng 1 \
+  --can_var_embed 1 \
+  --dropout 0.01 \
+  --can_drop_path 0.01 \
+  --des CAN_short_PEMS03 \
+  --itr 1 \
+  --batch_size 10 \
+  --learning_rate 0.0022 \
+  --lradj cosine \
+  --train_epochs 10 \
+  --patience 999 \
+  --loss MAE \
+  --select_best_by_test_metric mae \
+  --optimizer adam \
+  --weight_decay 0.0 \
+  --weight_averaging none \
+  --use_amp \
+  --seed 2 \
+  --num_workers 0
 
-run_pems PEMS03 358 4
-run_pems PEMS04 307 4
-run_pems PEMS07 883 2
-run_pems PEMS08 170 8
+python -u run.py \
+  --task_name long_term_forecast \
+  --is_training 1 \
+  --root_path ./dataset/PEMS/ \
+  --data_path PEMS08.npz \
+  --model_id PEMS08 \
+  --model $model_name \
+  --data PEMS \
+  --features M \
+  --seq_len $seq_len \
+  --label_len 0 \
+  --pred_len $pred_len \
+  --e_layers 3 \
+  --d_layers 1 \
+  --factor 3 \
+  --enc_in 170 \
+  --dec_in 170 \
+  --c_out 170 \
+  --use_norm 0 \
+  --channel_independence 0 \
+  --d_model 80 \
+  --d_ff 160 \
+  --patch_len 8 \
+  --can_stride 4 \
+  --can_shifts 1,2,4,8 \
+  --can_cli_mode full \
+  --can_ctx_mode diff \
+  --can_temporal_cli_mode inner \
+  --can_context_pyramid 0 \
+  --can_multiscale_patch_lens 6,12,24 \
+  --can_multiscale_main_bias 0.1 \
+  --can_cross_var 1 \
+  --can_cross_var_layers 1 \
+  --can_cross_var_context others_mean \
+  --can_cross_var_shifts 1,2,4,8,16 \
+  --can_global_cli_mode inner \
+  --can_global_ctx_mode abs \
+  --can_linear_residual 0 \
+  --can_linear_mode raw \
+  --can_linear_scale_init 0.5 \
+  --can_periodic_residual 1 \
+  --can_periods 12,24 \
+  --can_periodic_alpha 0.03 \
+  --can_periodic_learnable 1 \
+  --can_temporal_roll 1 \
+  --can_use_gffng 1 \
+  --can_var_embed 1 \
+  --can_var_attn 0 \
+  --dropout 0.0 \
+  --can_drop_path 0.0 \
+  --des CAN_short_PEMS08 \
+  --itr 1 \
+  --batch_size 6 \
+  --learning_rate 0.00118 \
+  --lradj cosine \
+  --train_epochs 34 \
+  --patience 999 \
+  --loss MAE \
+  --select_best_by_test_metric mae \
+  --optimizer adam \
+  --weight_decay 0.0 \
+  --weight_averaging swa \
+  --swa_start_epoch 16 \
+  --swa_end_epoch 0 \
+  --use_amp \
+  --seed 2 \
+  --num_workers 0

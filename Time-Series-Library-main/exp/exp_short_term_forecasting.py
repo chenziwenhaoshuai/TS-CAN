@@ -3,12 +3,10 @@ from data_provider.m4 import M4Meta
 from exp.exp_basic import Exp_Basic
 from utils.tools import EarlyStopping, adjust_learning_rate, visual
 from utils.losses import mape_loss, mase_loss, smape_loss
-from utils.m4_summary import M4Summary, mase, mape as m4_mape, smape_2
-from utils.metrics import metric
+from utils.m4_summary import M4Summary
 import torch
 import torch.nn as nn
 from torch import optim
-import csv
 import os
 import time
 import warnings
@@ -51,135 +49,40 @@ class Exp_Short_Term_Forecast(Exp_Basic):
             return mase_loss()
         elif loss_name == 'SMAPE':
             return smape_loss()
+        elif loss_name == 'OWA':
+            smape = smape_loss()
+            mase = mase_loss()
 
-    def _collect_test_predictions(self, train_loader, test_loader):
-        x, _ = train_loader.dataset.last_insample_window()
-        y = test_loader.dataset.timeseries
-        x = torch.tensor(x, dtype=torch.float32).to(self.device)
-        x = x.unsqueeze(-1)
-
-        was_training = self.model.training
-        self.model.eval()
-        with torch.no_grad():
-            batch_size = 500
-            preds = []
-            for start in range(0, x.shape[0], batch_size):
-                xb = x[start:start + batch_size]
-                dec_inp = torch.zeros(
-                    (xb.shape[0], self.args.pred_len, xb.shape[-1])
-                ).float().to(self.device)
-                dec_inp = torch.cat(
-                    [xb[:, -self.args.label_len:, :], dec_inp],
-                    dim=1
-                ).float()
-                outputs = self.model(xb, None, dec_inp, None)
-                f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                preds.append(outputs.detach().cpu())
-
-            pred = torch.cat(preds, dim=0).numpy()
-            true = np.array(y)
-
-        if was_training:
-            self.model.train()
-        return pred, true, x.detach().cpu().numpy()
-
-    def _evaluate_test_metrics(self, train_loader, test_loader, criterion):
-        preds, trues, insample = self._collect_test_predictions(
-            train_loader,
-            test_loader
-        )
-        preds = preds[:, :, 0]
-        insample = insample[:, :, 0]
-        batch_y_mark = torch.ones(trues.shape)
-        test_loss = criterion(
-            torch.from_numpy(insample),
-            self.args.frequency_map,
-            torch.from_numpy(preds),
-            torch.from_numpy(trues),
-            batch_y_mark
-        )
-
-        if self.args.data == 'm4':
-            frequency = self.args.frequency_map
-            test_mase = np.mean([
-                mase(
-                    forecast=preds[i],
-                    insample=train_loader.dataset.timeseries[i],
-                    outsample=trues[i],
-                    frequency=frequency
+            def criterion(insample, freq, forecast, target, mask):
+                return (
+                    0.045406786 * smape(insample, freq, forecast, target, mask)
+                    + 0.364595642 * mase(insample, freq, forecast, target, mask)
                 )
-                for i in range(len(preds))
-            ])
-            return {
-                'loss': float(test_loss),
-                'smape': float(np.mean(smape_2(preds, trues))),
-                'mape': float(np.mean(m4_mape(preds, trues))),
-                'mase': float(test_mase),
-            }
 
-        mae, mse, rmse, mape, mspe = metric(preds, trues)
-        return {
-            'loss': float(test_loss),
-            'mae': float(mae),
-            'mse': float(mse),
-            'rmse': float(rmse),
-            'mape': float(mape) * 100.0,
-            'mspe': float(mspe),
-        }
+            return criterion
 
-    def _append_epoch_test_metrics(
-        self,
-        setting,
-        epoch,
-        elapsed_sec,
-        train_loss,
-        vali_loss,
-        test_metrics
-    ):
-        folder_path = os.path.join(
-            getattr(self.args, 'results', './short_term_results'),
-            'epoch_test_metrics'
-        )
-        os.makedirs(folder_path, exist_ok=True)
-        metrics_path = os.path.join(folder_path, setting + '.csv')
-        base_fields = [
-            'epoch',
-            'elapsed_sec',
-            'train_loss',
-            'vali_loss',
-            'test_loss',
-        ]
-        metric_fields = [
-            'test_smape',
-            'test_mape',
-            'test_mase',
-            'test_mse',
-            'test_mae',
-            'test_rmse',
-            'test_mspe',
-        ]
-        fieldnames = base_fields + metric_fields
-        write_header = not os.path.exists(metrics_path)
-        with open(metrics_path, 'a', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            if write_header:
-                writer.writeheader()
-            row = {
-                'epoch': epoch,
-                'elapsed_sec': elapsed_sec,
-                'train_loss': train_loss,
-                'vali_loss': vali_loss,
-                'test_loss': test_metrics['loss'],
-            }
-            for key in metric_fields:
-                row[key] = test_metrics.get(key.replace('test_', ''), '')
-            writer.writerow(row)
+    def _parse_loss_schedule(self):
+        schedule_text = str(getattr(self.args, 'loss_schedule', '') or '').strip()
+        if not schedule_text:
+            return []
+        schedule = []
+        for chunk in schedule_text.split(','):
+            name, count = chunk.split(':', 1)
+            schedule.append((name.strip().upper(), int(count)))
+        return schedule
+
+    @staticmethod
+    def _loss_name_for_epoch(schedule, epoch_index):
+        cursor = 0
+        for name, count in schedule:
+            cursor += count
+            if epoch_index < cursor:
+                return name
+        return schedule[-1][0]
 
     def train(self, setting):
         train_data, train_loader = self._get_data(flag='train')
         vali_data, vali_loader = self._get_data(flag='val')
-        test_data, test_loader = self._get_data(flag='test')
 
         path = os.path.join(self.args.checkpoints, setting)
         if not os.path.exists(path):
@@ -191,11 +94,24 @@ class Exp_Short_Term_Forecast(Exp_Basic):
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
 
         model_optim = self._select_optimizer()
-        criterion = self._select_criterion(self.args.loss)
+        loss_schedule = self._parse_loss_schedule()
+        if loss_schedule:
+            criteria = {
+                name: self._select_criterion(name)
+                for name in sorted({name for name, _ in loss_schedule})
+            }
+            criterion = criteria[self._loss_name_for_epoch(loss_schedule, 0)]
+        else:
+            criteria = {}
+            criterion = self._select_criterion(self.args.loss)
         mse = nn.MSELoss()
-        test_every_epoch = bool(getattr(self.args, 'test_every_epoch', 1))
 
         for epoch in range(self.args.train_epochs):
+            if loss_schedule:
+                active_loss = self._loss_name_for_epoch(loss_schedule, epoch)
+                criterion = criteria[active_loss]
+            else:
+                active_loss = self.args.loss
             iter_count = 0
             train_loss = []
 
@@ -239,53 +155,9 @@ class Exp_Short_Term_Forecast(Exp_Basic):
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
             train_loss = np.average(train_loss)
             vali_loss = self.vali(train_loader, vali_loader, criterion)
-            if test_every_epoch:
-                test_metrics = self._evaluate_test_metrics(
-                    train_loader,
-                    test_loader,
-                    criterion
-                )
-                self._append_epoch_test_metrics(
-                    setting,
-                    epoch + 1,
-                    time.time() - epoch_time,
-                    train_loss,
-                    vali_loss,
-                    test_metrics
-                )
-            else:
-                test_metrics = {'loss': float(vali_loss)}
-            message = (
-                "Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} "
-                "Vali Loss: {3:.7f} Test Loss: {4:.7f}"
-            ).format(
-                epoch + 1,
-                train_steps,
-                train_loss,
-                vali_loss,
-                test_metrics['loss']
-            )
-            if test_every_epoch:
-                if self.args.data == 'm4':
-                    message += (
-                        " Test SMAPE: {0:.7f} Test MAPE: {1:.7f} "
-                        "Test MASE: {2:.7f}"
-                    ).format(
-                        test_metrics['smape'],
-                        test_metrics['mape'],
-                        test_metrics['mase']
-                    )
-                else:
-                    message += (
-                        " Test MSE: {0:.7f} Test MAE: {1:.7f} "
-                        "Test RMSE: {2:.7f} Test MAPE: {3:.7f}"
-                    ).format(
-                        test_metrics['mse'],
-                        test_metrics['mae'],
-                        test_metrics['rmse'],
-                        test_metrics['mape']
-                    )
-            print(message)
+            test_loss = vali_loss
+            print("Epoch: {0}, Steps: {1} | Loss: {2} Train Loss: {3:.7f} Vali Loss: {4:.7f} Test Loss: {5:.7f}".format(
+                epoch + 1, train_steps, active_loss, train_loss, vali_loss, test_loss))
             early_stopping(vali_loss, self.model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
@@ -384,7 +256,6 @@ class Exp_Short_Term_Forecast(Exp_Basic):
         forecasts_df = pandas.DataFrame(preds[:, :, 0], columns=[f'V{i + 1}' for i in range(self.args.pred_len)])
         forecasts_df.index = test_loader.dataset.ids[:preds.shape[0]]
         forecasts_df.index.name = 'id'
-        forecasts_df.set_index(forecasts_df.columns[0], inplace=True)
         forecasts_df.to_csv(folder_path + self.args.seasonal_patterns + '_forecast.csv')
 
         print(self.args.model)
@@ -395,16 +266,13 @@ class Exp_Short_Term_Forecast(Exp_Basic):
                 and 'Daily_forecast.csv' in os.listdir(file_path) \
                 and 'Hourly_forecast.csv' in os.listdir(file_path) \
                 and 'Quarterly_forecast.csv' in os.listdir(file_path):
-            try:
-                m4_summary = M4Summary(file_path, self.args.root_path)
-                # m4_forecast.set_index(m4_winner_forecast.columns[0], inplace=True)
-                smape_results, owa_results, mape, mase = m4_summary.evaluate()
-                print('smape:', smape_results)
-                print('mape:', mape)
-                print('mase:', mase)
-                print('owa:', owa_results)
-            except Exception as exc:
-                print(f'M4 summary skipped: {exc}')
+            m4_summary = M4Summary(file_path, self.args.root_path)
+            # m4_forecast.set_index(m4_winner_forecast.columns[0], inplace=True)
+            smape_results, owa_results, mape, mase = m4_summary.evaluate()
+            print('smape:', smape_results)
+            print('mape:', mape)
+            print('mase:', mase)
+            print('owa:', owa_results)
         else:
             print('After all 6 tasks are finished, you can calculate the averaged index')
         return

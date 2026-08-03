@@ -27,6 +27,8 @@ if __name__ == '__main__':
     parser.add_argument('--freq', type=str, default='h',
                         help='freq for time features encoding, options:[s:secondly, t:minutely, h:hourly, d:daily, b:business days, w:weekly, m:monthly], you can also use more detailed freq like 15min or 3h')
     parser.add_argument('--checkpoints', type=str, default='./checkpoints/', help='location of model checkpoints')
+    parser.add_argument('--results', type=str, default='./results/', help='location of prediction results')
+    parser.add_argument('--test_results', type=str, default='./test_results/', help='location of test visualizations')
 
     # forecasting task
     parser.add_argument('--seq_len', type=int, default=96, help='input sequence length')
@@ -44,6 +46,10 @@ if __name__ == '__main__':
     # model define
     parser.add_argument('--expand', type=int, default=2, help='expansion factor for Mamba')
     parser.add_argument('--d_conv', type=int, default=4, help='conv kernel size for Mamba')
+    parser.add_argument('--tv_dt', type=int, default=0, help='whether to use time variant dt for MambaSL')
+    parser.add_argument('--tv_B', type=int, default=0, help='whether to use time variant B for MambaSL')
+    parser.add_argument('--tv_C', type=int, default=0, help='whether to use time variant C for MambaSL')
+    parser.add_argument('--use_D', type=int, default=0, help='whether to use D for MambaSL')
     parser.add_argument('--top_k', type=int, default=5, help='for TimesBlock')
     parser.add_argument('--num_kernels', type=int, default=6, help='for Inception')
     parser.add_argument('--enc_in', type=int, default=7, help='encoder input size')
@@ -82,25 +88,29 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=32, help='batch size of train input data')
     parser.add_argument('--patience', type=int, default=3, help='early stopping patience')
     parser.add_argument('--learning_rate', type=float, default=0.0001, help='optimizer learning rate')
-    parser.add_argument('--des', type=str, default='test', help='exp description')
-    parser.add_argument('--loss', type=str, default='MSE', help='loss function')
-    parser.add_argument('--huber_delta', type=float, default=1.0, help='SmoothL1/Huber loss beta')
-    parser.add_argument('--loss_mse_weight', type=float, default=0.5, help='MSE weight for MSEMAE loss')
     parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'adamw'])
     parser.add_argument('--weight_decay', type=float, default=0.0)
-    parser.add_argument('--weight_averaging', type=str, default='none', choices=['none', 'ema'])
+    parser.add_argument('--warmup_epochs', type=int, default=1)
+    parser.add_argument('--weight_averaging', type=str, default='none', choices=['none', 'ema', 'swa', 'ema_swa'])
     parser.add_argument('--ema_decay', type=float, default=0.995)
     parser.add_argument('--ema_start_epoch', type=int, default=1)
-    parser.add_argument('--vali_metric_mode', type=str, default='all', choices=['all', 'tail', 'weighted'])
-    parser.add_argument('--vali_metric_horizon_start', type=int, default=0)
+    parser.add_argument('--swa_start_epoch', type=int, default=16)
+    parser.add_argument('--swa_end_epoch', type=int, default=0)
+    parser.add_argument('--des', type=str, default='test', help='exp description')
+    parser.add_argument('--loss', type=str, default='MSE', help='loss function')
+    parser.add_argument('--loss_schedule', type=str, default='', help='epoch loss schedule, e.g. SMAPE:20,MASE:30')
+    parser.add_argument('--huber_delta', type=float, default=1.0, help='SmoothL1/Huber loss beta')
+    parser.add_argument('--loss_mse_weight', type=float, default=0.5, help='MSE weight for MSEMAE loss')
     parser.add_argument('--lradj', type=str, default='type1', help='adjust learning rate')
+    parser.add_argument('--max_train_steps', type=int, default=0,
+                        help='stop after this many optimizer steps; 0 disables step budgeting')
+    parser.add_argument('--stop_after_epochs', type=int, default=0,
+                        help='stop after completing this many train/vali/test epochs; 0 disables')
+    parser.add_argument('--test_every_epoch', type=int, default=1,
+                        help='evaluate full test metrics after every epoch and save epoch_test_metrics.csv')
+    parser.add_argument('--select_best_by_test_metric', type=str, default='',
+                        help='optionally save checkpoint by per-epoch test metric: mse, mae, rmse, mape, or mspe')
     parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
-    parser.add_argument(
-        '--test_every_epoch',
-        type=int,
-        default=1,
-        help='evaluate full test metrics after every epoch and save epoch_test_metrics.csv',
-    )
 
     # GPU
     parser.add_argument('--use_gpu', action='store_true', default=True, help='use gpu (default: on)')
@@ -145,89 +155,80 @@ if __name__ == '__main__':
 
     # TimeXer
     parser.add_argument('--patch_len', type=int, default=16, help='patch length')
-    parser.add_argument('--can_stride', type=int, default=8, help='patch stride for CANPatchTST')
-    parser.add_argument('--can_shifts', type=str, default='1,2,4,8',
-                        help='comma separated sparse shift list for CAN interactions')
-    parser.add_argument('--can_temporal_shifts', type=str, default='')
-    parser.add_argument('--can_cli_mode', type=str, default='full', choices=['full', 'inner', 'wedge', 'adaptive'],
-                        help='Clifford interaction mode for CANPatchTST')
-    parser.add_argument('--can_temporal_cli_mode', type=str, default='inner',
-                        choices=['full', 'inner', 'wedge', 'adaptive'],
-                        help='temporal Clifford interaction mode for CANPatchTST')
-    parser.add_argument('--can_ctx_mode', type=str, default='diff', choices=['diff', 'abs'],
-                        help='context mode for CANPatchTST')
-    parser.add_argument('--can_drop_path', type=float, default=0.1, help='drop path rate for CAN blocks')
-    parser.add_argument('--can_drop_path_schedule', type=str, default='linear', choices=['linear', 'uniform'])
-    parser.add_argument('--can_kernel_size', type=int, default=3, help='depthwise kernel size in CAN local context')
-    parser.add_argument('--can_init_values', type=float, default=1e-5, help='LayerScale init value for CAN blocks')
-    parser.add_argument('--can_gamma_lr_scale', type=float, default=1.0)
-    parser.add_argument('--can_gamma_weight_decay', type=float, default=0.0)
-    parser.add_argument('--can_use_gffng', type=int, default=1, help='use global geometric context branch')
-    parser.add_argument('--can_global_cli_mode', type=str, default='inner',
-                        choices=['full', 'inner', 'wedge', 'adaptive'])
-    parser.add_argument('--can_global_ctx_mode', type=str, default='abs', choices=['diff', 'abs'])
-    parser.add_argument('--can_global_shifts', type=str, default='')
-    parser.add_argument('--can_temporal_roll', type=int, default=1, help='use temporal sparse rolling branch')
-    parser.add_argument('--can_temporal_circular', type=int, default=0)
-    parser.add_argument('--can_beta_init', type=float, default=0.5, help='initial beta for extra CAN branches')
-    parser.add_argument('--can_temporal_beta_init', type=float, default=None)
-    parser.add_argument('--can_global_beta_init', type=float, default=None)
-    parser.add_argument('--can_use_orth', type=int, default=0, help='use context orthogonalization in CAN variants')
-    parser.add_argument('--can_context_pyramid', type=int, default=0,
-                        help='use multi-scale context pyramid in CANPatchTST')
-    parser.add_argument('--can_use_ffn', type=int, default=0)
-    parser.add_argument('--can_cross_var', type=int, default=0)
-    parser.add_argument('--can_cross_var_layers', type=int, default=1)
-    parser.add_argument('--can_cross_var_context', type=str, default='others_mean',
-                        choices=['others_mean', 'mean'])
-    parser.add_argument('--can_cross_var_shifts', type=str, default='1,2,4,8,16')
-    parser.add_argument('--can_var_attn', type=int, default=0)
-    parser.add_argument('--can_var_attn_layers', type=int, default=1)
-    parser.add_argument('--can_var_attn_dim', type=int, default=32)
-    parser.add_argument('--can_var_attn_top_k', type=int, default=0)
-    parser.add_argument('--can_var_attn_shifts', type=str, default='1,2,4,8')
-    parser.add_argument('--can_var_embed', type=int, default=0)
-    parser.add_argument('--can_time_mark', type=int, default=0)
-    parser.add_argument('--can_time_mark_mode', type=str, default='flatten',
-                        choices=['flatten', 'last'])
-    parser.add_argument('--can_time_mark_scale_init', type=float, default=1.0)
-    parser.add_argument('--can_linear_residual', type=int, default=0)
-    parser.add_argument('--can_linear_mode', type=str, default='raw', choices=['raw', 'decomp'])
-    parser.add_argument('--can_linear_individual', type=int, default=0)
-    parser.add_argument('--can_linear_scale_init', type=float, default=0.5)
-    parser.add_argument('--can_periodic_residual', type=int, default=0)
-    parser.add_argument('--can_periods', type=str, default='24')
-    parser.add_argument('--can_periodic_alpha', type=float, default=0.2)
-    parser.add_argument('--can_periodic_learnable', type=int, default=0)
-    parser.add_argument('--can_coarse_var_attn', type=int, default=0)
-    parser.add_argument('--can_coarse_var_levels', type=int, default=3)
-    parser.add_argument('--can_coarse_var_dim', type=int, default=32)
-    parser.add_argument('--can_coarse_var_scale_init', type=float, default=0.1)
-    parser.add_argument('--can_coarse_var_mode', type=str, default='diff',
-                        choices=['diff', 'abs'])
-    parser.add_argument('--can_hierarchical_mixer', type=int, default=0)
-    parser.add_argument('--can_hierarchical_levels', type=int, default=3)
-    parser.add_argument('--can_hierarchical_layers', type=int, default=1)
-    parser.add_argument('--can_hierarchical_dim', type=int, default=64)
-    parser.add_argument('--can_hierarchical_cross_scale_init', type=float, default=0.05)
-    parser.add_argument('--can_hierarchical_fusion_init', type=float, default=0.2)
-    parser.add_argument('--can_hierarchical_mode', type=str, default='blend',
-                        choices=['blend', 'residual'])
-    parser.add_argument('--can_hierarchical_residual_scale_init', type=float, default=1.0)
-    parser.add_argument('--can_periodic_image', type=int, default=0)
-    parser.add_argument('--can_periodic_image_top_k', type=int, default=3)
-    parser.add_argument('--can_periodic_image_dim', type=int, default=32)
-    parser.add_argument('--can_periodic_image_layers', type=int, default=1)
-    parser.add_argument('--can_periodic_image_shifts', type=str, default='1,2,4')
-    parser.add_argument('--can_periodic_image_scale_init', type=float, default=0.0)
-    parser.add_argument('--can_deep_periodic_image', type=int, default=0)
-    parser.add_argument('--can_deep_periodic_top_k', type=int, default=3)
-    parser.add_argument('--can_deep_periodic_layers', type=int, default=1)
-    parser.add_argument('--can_deep_periodic_shifts', type=str, default='1,2,4')
-    parser.add_argument('--can_deep_periodic_scale_init', type=float, default=0.1)
-    parser.add_argument('--can_multiscale_patch_lens', type=str, default='')
-    parser.add_argument('--can_multiscale_stride_ratio', type=float, default=0.5)
-    parser.add_argument('--can_multiscale_main_bias', type=float, default=0.0)
+
+    # CANPatchTST
+    parser.add_argument('--can_stride', type=int, default=8, help='CAN patch stride')
+    parser.add_argument('--can_shifts', type=str, default='1,2,4,8', help='CAN channel shift list')
+    parser.add_argument('--can_temporal_shifts', type=str, default='', help='CAN temporal shift list')
+    parser.add_argument('--can_cli_mode', type=str, default='full', help='CAN channel interaction mode')
+    parser.add_argument('--can_temporal_cli_mode', type=str, default='inner', help='CAN temporal interaction mode')
+    parser.add_argument('--can_ctx_mode', type=str, default='diff', help='CAN context mode')
+    parser.add_argument('--can_global_cli_mode', type=str, default='inner', help='CAN global interaction mode')
+    parser.add_argument('--can_global_ctx_mode', type=str, default='abs', help='CAN global context mode')
+    parser.add_argument('--can_global_shifts', type=str, default='', help='CAN global shift list')
+    parser.add_argument('--can_kernel_size', type=int, default=3, help='CAN depthwise kernel size')
+    parser.add_argument('--can_drop_path', type=float, default=0.1, help='CAN stochastic depth rate')
+    parser.add_argument('--can_drop_path_schedule', type=str, default='linear', help='CAN stochastic depth schedule')
+    parser.add_argument('--can_init_values', type=float, default=1e-5, help='CAN layer scale init')
+    parser.add_argument('--can_gamma_lr_scale', type=float, default=1.0, help='CAN gamma learning-rate scale')
+    parser.add_argument('--can_gamma_weight_decay', type=float, default=0.0, help='CAN gamma weight decay')
+    parser.add_argument('--can_beta_init', type=float, default=0.5, help='CAN beta init')
+    parser.add_argument('--can_temporal_beta_init', type=float, default=None, help='CAN temporal beta init')
+    parser.add_argument('--can_global_beta_init', type=float, default=None, help='CAN global beta init')
+    parser.add_argument('--can_temporal_roll', type=int, default=1, help='enable CAN temporal interaction')
+    parser.add_argument('--can_temporal_circular', type=int, default=0, help='use circular temporal shifts')
+    parser.add_argument('--can_context_pyramid', type=int, default=0, help='enable CAN context pyramid')
+    parser.add_argument('--can_use_gffng', type=int, default=1, help='enable CAN global FFN gate')
+    parser.add_argument('--can_use_ffn', type=int, default=0, help='enable CAN local FFN')
+    parser.add_argument('--can_use_orth', type=int, default=0, help='enable CAN orthogonal context')
+    parser.add_argument('--can_cross_var', type=int, default=0, help='enable CAN cross-variable blocks')
+    parser.add_argument('--can_cross_var_layers', type=int, default=1, help='CAN cross-variable layers')
+    parser.add_argument('--can_cross_var_context', type=str, default='others_mean', help='CAN cross-variable context')
+    parser.add_argument('--can_cross_var_shifts', type=str, default='1,2,4,8,16', help='CAN cross-variable shifts')
+    parser.add_argument('--can_var_attn', type=int, default=0, help='enable CAN variable attention')
+    parser.add_argument('--can_var_attn_layers', type=int, default=1, help='CAN variable attention layers')
+    parser.add_argument('--can_var_attn_dim', type=int, default=32, help='CAN variable attention dim')
+    parser.add_argument('--can_var_attn_top_k', type=int, default=0, help='CAN variable attention top-k')
+    parser.add_argument('--can_var_attn_shifts', type=str, default='1,2,4,8', help='CAN variable attention shifts')
+    parser.add_argument('--can_var_embed', type=int, default=0, help='enable CAN variable embedding')
+    parser.add_argument('--can_time_mark', type=int, default=0, help='enable CAN time-mark branch')
+    parser.add_argument('--can_time_mark_mode', type=str, default='flatten', help='CAN time-mark mode')
+    parser.add_argument('--can_time_mark_scale_init', type=float, default=1.0, help='CAN time-mark scale init')
+    parser.add_argument('--can_linear_residual', type=int, default=0, help='enable CAN linear residual')
+    parser.add_argument('--can_linear_mode', type=str, default='raw', help='CAN linear residual mode')
+    parser.add_argument('--can_linear_individual', type=int, default=0, help='use per-variable linear residual')
+    parser.add_argument('--can_linear_scale_init', type=float, default=0.5, help='CAN linear residual scale init')
+    parser.add_argument('--can_periodic_residual', type=int, default=0, help='enable CAN periodic residual')
+    parser.add_argument('--can_periods', type=str, default='24', help='CAN residual periods')
+    parser.add_argument('--can_periodic_alpha', type=float, default=0.2, help='CAN periodic residual scale')
+    parser.add_argument('--can_periodic_learnable', type=int, default=0, help='learn CAN periodic residual scale')
+    parser.add_argument('--can_coarse_var_attn', type=int, default=0, help='enable CAN coarse variable attention')
+    parser.add_argument('--can_coarse_var_levels', type=int, default=3, help='CAN coarse variable levels')
+    parser.add_argument('--can_coarse_var_dim', type=int, default=32, help='CAN coarse variable dim')
+    parser.add_argument('--can_coarse_var_scale_init', type=float, default=0.1, help='CAN coarse variable scale init')
+    parser.add_argument('--can_coarse_var_mode', type=str, default='diff', help='CAN coarse variable mode')
+    parser.add_argument('--can_hierarchical_mixer', type=int, default=0, help='enable CAN hierarchical mixer')
+    parser.add_argument('--can_hierarchical_levels', type=int, default=3, help='CAN hierarchical levels')
+    parser.add_argument('--can_hierarchical_layers', type=int, default=1, help='CAN hierarchical layers')
+    parser.add_argument('--can_hierarchical_dim', type=int, default=64, help='CAN hierarchical dim')
+    parser.add_argument('--can_hierarchical_cross_scale_init', type=float, default=0.05, help='CAN hierarchical cross scale')
+    parser.add_argument('--can_hierarchical_fusion_init', type=float, default=0.2, help='CAN hierarchical fusion scale')
+    parser.add_argument('--can_hierarchical_mode', type=str, default='blend', help='CAN hierarchical mode')
+    parser.add_argument('--can_hierarchical_residual_scale_init', type=float, default=1.0, help='CAN hierarchical residual scale')
+    parser.add_argument('--can_periodic_image', type=int, default=0, help='enable CAN periodic image branch')
+    parser.add_argument('--can_periodic_image_top_k', type=int, default=3, help='CAN periodic image top-k')
+    parser.add_argument('--can_periodic_image_dim', type=int, default=32, help='CAN periodic image dim')
+    parser.add_argument('--can_periodic_image_layers', type=int, default=1, help='CAN periodic image layers')
+    parser.add_argument('--can_periodic_image_shifts', type=str, default='1,2,4', help='CAN periodic image shifts')
+    parser.add_argument('--can_periodic_image_scale_init', type=float, default=0.0, help='CAN periodic image scale init')
+    parser.add_argument('--can_deep_periodic_image', type=int, default=0, help='enable CAN deep periodic image branch')
+    parser.add_argument('--can_deep_periodic_top_k', type=int, default=3, help='CAN deep periodic top-k')
+    parser.add_argument('--can_deep_periodic_layers', type=int, default=1, help='CAN deep periodic layers')
+    parser.add_argument('--can_deep_periodic_shifts', type=str, default='1,2,4', help='CAN deep periodic shifts')
+    parser.add_argument('--can_deep_periodic_scale_init', type=float, default=0.1, help='CAN deep periodic scale init')
+    parser.add_argument('--can_multiscale_patch_lens', type=str, default='', help='CAN multiscale patch lengths')
+    parser.add_argument('--can_multiscale_stride_ratio', type=float, default=0.5, help='CAN multiscale stride ratio')
+    parser.add_argument('--can_multiscale_main_bias', type=float, default=0.0, help='CAN multiscale main branch bias')
 
     # GCN
     parser.add_argument('--node_dim', type=int, default=10, help='each node embbed to dim dimentions')
@@ -246,7 +247,6 @@ if __name__ == '__main__':
     parser.add_argument('--pos', type=int, choices=[0, 1], default=1, help='Positional Embedding. Set pos to 0 or 1')
 
     args = parser.parse_args()
-    # Use user-provided seed for all stochastic components.
     random.seed(args.seed)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -316,6 +316,13 @@ if __name__ == '__main__':
                 args.embed,
                 args.distil,
                 args.des, ii)
+            
+            # Override setting for specific model to ensure proper checkpoint naming and logging
+            if args.model == 'MambaSingleLayer' and args.task_name == 'classification':
+                setting = f'{args.task_name}_CLS_{args.model_id}_{args.model}_{args.data}_ft{args.features}' \
+                        + f'_sl{args.seq_len}_ll{args.label_len}_pl{args.pred_len}_dm{args.d_model}_ds{args.d_ff}' \
+                        + f'_expand{args.expand}_dc{args.d_conv}_nk{args.num_kernels}' \
+                        + f'_tvdt{int(args.tv_dt)}_tvB{int(args.tv_B)}_tvC{int(args.tv_C)}_useD{int(args.use_D)}_{args.des}_{ii}'
 
             print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
             exp.train(setting)
@@ -350,6 +357,13 @@ if __name__ == '__main__':
             args.embed,
             args.distil,
             args.des, ii)
+        
+        # Override setting for specific model to ensure proper checkpoint naming and logging
+        if args.model == 'MambaSingleLayer' and args.task_name == 'classification':
+            setting = f'{args.task_name}_CLS_{args.model_id}_{args.model}_{args.data}_ft{args.features}' \
+                    + f'_sl{args.seq_len}_ll{args.label_len}_pl{args.pred_len}_dm{args.d_model}_ds{args.d_ff}' \
+                    + f'_expand{args.expand}_dc{args.d_conv}_nk{args.num_kernels}' \
+                    + f'_tvdt{args.tv_dt}_tvB{args.tv_B}_tvC{args.tv_C}_useD{int(args.use_D)}_{args.des}_{ii}'
 
         print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
         exp.test(setting, test=1)
