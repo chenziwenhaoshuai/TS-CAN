@@ -84,12 +84,12 @@ python -u run.py \
   --can_periodic_image_dim 16 \
   --can_periodic_image_layers 1 \
   --can_periodic_image_shifts 1,2,4 \
-  --can_periodic_image_scale_init 0.0038 \
+  --can_periodic_image_scale_init 0.0036 \
   --can_drop_path 0.0 \
-  --dropout 0.0032 \
+  --dropout 0.0030 \
   --des CAN_M4_Quarterly \
   --itr 1 \
-  --learning_rate 0.0044 \
+  --learning_rate 0.00436 \
   --lradj cosine \
   --train_epochs 58 \
   --patience 58 \
