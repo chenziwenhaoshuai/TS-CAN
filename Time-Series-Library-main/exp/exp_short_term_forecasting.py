@@ -1,9 +1,10 @@
 from data_provider.data_factory import data_provider
-from data_provider.m4 import M4Meta
+from collections import OrderedDict
+
+from data_provider.m4 import M4Dataset, M4Meta
 from exp.exp_basic import Exp_Basic
 from utils.tools import EarlyStopping, adjust_learning_rate, visual
 from utils.losses import mape_loss, mase_loss, smape_loss
-from utils.m4_summary import M4Summary
 import torch
 import torch.nn as nn
 from torch import optim
@@ -14,6 +15,116 @@ import numpy as np
 import pandas
 
 warnings.filterwarnings('ignore')
+
+
+def _m4_group_values(values, groups, group_name):
+    indices = np.where(groups == group_name)[0]
+    grouped = []
+    for index in indices:
+        value = np.asarray(values[index], dtype=np.float32)
+        grouped.append(value[~np.isnan(value)])
+    if not grouped:
+        return np.array([])
+    lengths = {len(v) for v in grouped}
+    if len(lengths) == 1:
+        return np.stack(grouped)
+    return grouped
+
+
+def _m4_mase(forecast, insample, outsample, frequency):
+    return np.mean(np.abs(forecast - outsample)) / np.mean(np.abs(insample[:-frequency] - insample[frequency:]))
+
+
+def _m4_smape_2(forecast, target):
+    denom = np.abs(target) + np.abs(forecast)
+    denom[denom == 0.0] = 1.0
+    return 200 * np.abs(forecast - target) / denom
+
+
+def _m4_mape(forecast, target):
+    denom = np.abs(target)
+    denom[denom == 0.0] = 1.0
+    return 100 * np.abs(forecast - target) / denom
+
+
+def _m4_summarize_groups(scores, groups):
+    scores_summary = OrderedDict()
+
+    def group_count(group_name):
+        return len(np.where(groups == group_name)[0])
+
+    if set(scores) != set(M4Meta.seasonal_patterns):
+        return OrderedDict((key, scores[key]) for key in scores)
+
+    weighted_score = {}
+    for group_name in ['Yearly', 'Quarterly', 'Monthly']:
+        weighted_score[group_name] = scores[group_name] * group_count(group_name)
+        scores_summary[group_name] = scores[group_name]
+
+    others_score = 0
+    others_count = 0
+    for group_name in ['Weekly', 'Daily', 'Hourly']:
+        others_score += scores[group_name] * group_count(group_name)
+        others_count += group_count(group_name)
+    weighted_score['Others'] = others_score
+    scores_summary['Others'] = others_score / others_count
+
+    average = sum(weighted_score.values()) / len(groups)
+    scores_summary['Average'] = average
+    return scores_summary
+
+
+def _evaluate_m4_summary(file_path, root_path):
+    training_set = M4Dataset.load(training=True, dataset_file=root_path)
+    test_set = M4Dataset.load(training=False, dataset_file=root_path)
+    naive_path = os.path.join(root_path, 'submission-Naive2.csv')
+    naive2_values = pandas.read_csv(naive_path).values[:, 1:].astype(np.float32)
+    naive2_forecasts = [v[~np.isnan(v)] for v in naive2_values]
+
+    model_mases = {}
+    naive2_smapes = {}
+    naive2_mases = {}
+    grouped_smapes = {}
+    grouped_mapes = {}
+    for group_name in M4Meta.seasonal_patterns:
+        forecast_path = file_path + group_name + '_forecast.csv'
+        if not os.path.exists(forecast_path):
+            continue
+        model_forecast = pandas.read_csv(forecast_path).values[:, 1:].astype(np.float32)
+
+        naive2_forecast = _m4_group_values(naive2_forecasts, test_set.groups, group_name)
+        target = _m4_group_values(test_set.values, test_set.groups, group_name)
+        frequency = training_set.frequencies[test_set.groups == group_name][0]
+        insample = _m4_group_values(training_set.values, test_set.groups, group_name)
+
+        model_mases[group_name] = np.mean([
+            _m4_mase(forecast=model_forecast[i], insample=insample[i], outsample=target[i], frequency=frequency)
+            for i in range(len(model_forecast))
+        ])
+        naive2_mases[group_name] = np.mean([
+            _m4_mase(forecast=naive2_forecast[i], insample=insample[i], outsample=target[i], frequency=frequency)
+            for i in range(len(model_forecast))
+        ])
+        naive2_smapes[group_name] = np.mean(_m4_smape_2(naive2_forecast, target))
+        grouped_smapes[group_name] = np.mean(_m4_smape_2(forecast=model_forecast, target=target))
+        grouped_mapes[group_name] = np.mean(_m4_mape(forecast=model_forecast, target=target))
+
+    grouped_smapes = _m4_summarize_groups(grouped_smapes, test_set.groups)
+    grouped_mapes = _m4_summarize_groups(grouped_mapes, test_set.groups)
+    grouped_model_mases = _m4_summarize_groups(model_mases, test_set.groups)
+    grouped_naive2_smapes = _m4_summarize_groups(naive2_smapes, test_set.groups)
+    grouped_naive2_mases = _m4_summarize_groups(naive2_mases, test_set.groups)
+    grouped_owa = OrderedDict()
+    for key in grouped_model_mases.keys():
+        grouped_owa[key] = (
+            grouped_model_mases[key] / grouped_naive2_mases[key]
+            + grouped_smapes[key] / grouped_naive2_smapes[key]
+        ) / 2
+
+    def round_all(scores):
+        return dict((key, np.round(value, 3)) for key, value in scores.items())
+
+    return round_all(grouped_smapes), round_all(grouped_owa), round_all(grouped_mapes), round_all(grouped_model_mases)
 
 
 class Exp_Short_Term_Forecast(Exp_Basic):
@@ -266,9 +377,7 @@ class Exp_Short_Term_Forecast(Exp_Basic):
                 and 'Daily_forecast.csv' in os.listdir(file_path) \
                 and 'Hourly_forecast.csv' in os.listdir(file_path) \
                 and 'Quarterly_forecast.csv' in os.listdir(file_path):
-            m4_summary = M4Summary(file_path, self.args.root_path)
-            # m4_forecast.set_index(m4_winner_forecast.columns[0], inplace=True)
-            smape_results, owa_results, mape, mase = m4_summary.evaluate()
+            smape_results, owa_results, mape, mase = _evaluate_m4_summary(file_path, self.args.root_path)
             print('smape:', smape_results)
             print('mape:', mape)
             print('mase:', mase)

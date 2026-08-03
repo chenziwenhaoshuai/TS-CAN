@@ -26,17 +26,7 @@ import os
 
 
 def group_values(values, groups, group_name):
-    indices = np.where(groups == group_name)[0]
-    grouped = []
-    for index in indices:
-        value = np.asarray(values[index], dtype=np.float32)
-        grouped.append(value[~np.isnan(value)])
-    if not grouped:
-        return np.array([])
-    lengths = {len(v) for v in grouped}
-    if len(lengths) == 1:
-        return np.stack(grouped)
-    return grouped
+    return np.array([v[~np.isnan(v)] for v in values[groups == group_name]])
 
 
 def mase(forecast, insample, outsample, frequency):
@@ -73,8 +63,8 @@ class M4Summary:
         """
         grouped_owa = OrderedDict()
 
-        naive2_values = pd.read_csv(self.naive_path).values[:, 1:].astype(np.float32)
-        naive2_forecasts = [v[~np.isnan(v)] for v in naive2_values]
+        naive2_forecasts = pd.read_csv(self.naive_path).values[:, 1:].astype(np.float32)
+        naive2_forecasts = np.array([v[~np.isnan(v)] for v in naive2_forecasts])
 
         model_mases = {}
         naive2_smapes = {}
