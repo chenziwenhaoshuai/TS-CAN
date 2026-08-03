@@ -364,6 +364,50 @@ class CrossVariableCliffordBlock(nn.Module):
         return out.reshape(batch_size, n_vars, dim, patch_num)
 
 
+class VariableAttentionCliffordBlock(nn.Module):
+    def __init__(self, dim, shifts, attn_dim=32, top_k=0, drop_path_rate=0.0, init_values=1e-5):
+        super().__init__()
+        self.top_k = int(top_k)
+        self.norm = LayerNorm1dChannels(dim)
+        self.query = nn.Linear(dim, attn_dim, bias=False)
+        self.key = nn.Linear(dim, attn_dim, bias=False)
+        self.get_state = nn.Conv1d(dim, dim, kernel_size=1)
+        self.get_context = nn.Conv1d(dim, dim, kernel_size=1)
+        self.interaction = CliffordChannelInteraction1D(
+            dim=dim,
+            cli_mode='full',
+            ctx_mode='diff',
+            shifts=shifts
+        )
+        self.gate_fc = nn.Conv1d(dim * 2, dim, kernel_size=1)
+        self.gamma = nn.Parameter(torch.full((1, dim, 1), init_values))
+        self.drop_path = DropPath(drop_path_rate) if drop_path_rate > 0.0 else nn.Identity()
+
+    def forward(self, x):
+        batch_size, n_vars, dim, patch_num = x.shape
+        flat = x.reshape(batch_size * n_vars, dim, patch_num)
+        x_ln = self.norm(flat).reshape(batch_size, n_vars, dim, patch_num)
+
+        summary = x_ln.mean(dim=-1)
+        query = F.normalize(self.query(summary), dim=-1)
+        key = F.normalize(self.key(summary), dim=-1)
+        scores = torch.matmul(query, key.transpose(1, 2)) / (query.shape[-1] ** 0.5)
+        if self.top_k > 0 and self.top_k < n_vars:
+            top_values, top_indices = torch.topk(scores, self.top_k, dim=-1)
+            masked = scores.new_full(scores.shape, -torch.inf)
+            scores = masked.scatter(-1, top_indices, top_values)
+        weights = torch.softmax(scores, dim=-1)
+        context = torch.einsum('bij,bjdp->bidp', weights, x_ln)
+
+        state = self.get_state(flat)
+        context = self.get_context(context.reshape(batch_size * n_vars, dim, patch_num))
+        geom = self.interaction(state, context)
+        gate = torch.sigmoid(self.gate_fc(torch.cat([flat, geom], dim=1)))
+        mixed = F.silu(flat) + gate * geom
+        out = flat + self.drop_path(self.gamma * mixed)
+        return out.reshape(batch_size, n_vars, dim, patch_num)
+
+
 class TimePatchEmbedding(nn.Module):
     def __init__(self, time_dim, d_model, patch_len, stride, padding, mode='flatten', scale_init=1.0):
         super().__init__()
@@ -1143,6 +1187,7 @@ class Model(nn.Module):
         self.pred_len = configs.pred_len
         self.enc_in = configs.enc_in
         self.d_model = configs.d_model
+        self.use_norm = bool(getattr(configs, 'use_norm', 1))
 
         patch_len = getattr(configs, 'patch_len', 16)
         stride = getattr(configs, 'can_stride', max(1, patch_len // 2))
@@ -1208,6 +1253,16 @@ class Model(nn.Module):
         ]
         if not cross_var_shifts:
             cross_var_shifts = [1]
+        use_variable_attention = bool(getattr(configs, 'can_var_attn', 0))
+        variable_attention_layers = int(getattr(configs, 'can_var_attn_layers', 1))
+        variable_attention_dim = int(getattr(configs, 'can_var_attn_dim', 32))
+        variable_attention_top_k = int(getattr(configs, 'can_var_attn_top_k', 0))
+        variable_attention_shifts = [
+            s for s in parse_shift_list(getattr(configs, 'can_var_attn_shifts', '1,2,4,8'))
+            if s < self.d_model
+        ]
+        if not variable_attention_shifts:
+            variable_attention_shifts = [1]
         use_variable_embedding = bool(getattr(configs, 'can_var_embed', 0))
         use_time_mark = bool(getattr(configs, 'can_time_mark', 0))
         time_mark_mode = getattr(configs, 'can_time_mark_mode', 'flatten')
@@ -1478,6 +1533,23 @@ class Model(nn.Module):
                 ]
             )
             self.cross_var_final_norm = nn.LayerNorm(configs.d_model)
+        self.use_variable_attention = use_variable_attention
+        if self.use_variable_attention:
+            var_attn_dpr = torch.linspace(0, can_drop_path, max(1, variable_attention_layers)).tolist()
+            self.variable_attention_blocks = nn.ModuleList(
+                [
+                    VariableAttentionCliffordBlock(
+                        dim=configs.d_model,
+                        shifts=variable_attention_shifts,
+                        attn_dim=variable_attention_dim,
+                        top_k=variable_attention_top_k,
+                        drop_path_rate=var_attn_dpr[i],
+                        init_values=init_values
+                    )
+                    for i in range(variable_attention_layers)
+                ]
+            )
+            self.variable_attention_final_norm = nn.LayerNorm(configs.d_model)
 
         head_nf = configs.d_model * patch_num
         if self.task_name in ('long_term_forecast', 'short_term_forecast'):
@@ -1536,10 +1608,14 @@ class Model(nn.Module):
         return head(enc_out).permute(0, 2, 1)
 
     def forecast(self, x_enc, x_mark_enc=None):
-        means = x_enc.mean(1, keepdim=True).detach()
-        x_enc = x_enc - means
-        stdev = torch.sqrt(torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
-        x_enc = x_enc / stdev
+        if self.use_norm:
+            means = x_enc.mean(1, keepdim=True).detach()
+            x_enc = x_enc - means
+            stdev = torch.sqrt(torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
+            x_enc = x_enc / stdev
+        else:
+            means = None
+            stdev = None
         normalized_x_enc = x_enc
         if self.use_periodic_image:
             if self.training:
@@ -1598,6 +1674,12 @@ class Model(nn.Module):
             enc_out = self.cross_var_final_norm(
                 enc_out.permute(0, 1, 3, 2)
             ).permute(0, 1, 3, 2)
+        if self.use_variable_attention:
+            for block in self.variable_attention_blocks:
+                enc_out = block(enc_out)
+            enc_out = self.variable_attention_final_norm(
+                enc_out.permute(0, 1, 3, 2)
+            ).permute(0, 1, 3, 2)
         dec_out = self.head(enc_out).permute(0, 2, 1)
         if self.multiscale_patch_lens:
             scale_outputs = [dec_out]
@@ -1646,8 +1728,9 @@ class Model(nn.Module):
                     self.hierarchical_residual_scale * hierarchical_out
                 )
 
-        dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
-        dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
+        if self.use_norm:
+            dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
+            dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
         return dec_out
 
     def optimizer_param_groups(self, base_lr):

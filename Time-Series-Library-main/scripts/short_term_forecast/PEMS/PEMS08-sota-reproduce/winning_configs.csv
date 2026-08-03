@@ -1,0 +1,2 @@
+dataset,subset_or_pred_len,mae,mape,rmse,timemixerpp_mae,timemixerpp_mape,timemixerpp_rmse,win_count,status,trial,epoch,wrapper,updated_at
+PEMS08,12,13.7845659256,8.9920639992,23.0662471549,13.8100000000,8.2100000000,23.6200000000,2,accepted_2_of_3,P8W35_10_bs6_lr00118_swa_s16,18,run_reproduce.sh,2026-07-31

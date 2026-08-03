@@ -10,8 +10,20 @@ import time
 import warnings
 import numpy as np
 import copy
+import csv
 
 warnings.filterwarnings('ignore')
+
+
+class _MSEMAELoss(nn.Module):
+    def __init__(self, alpha=0.5):
+        super().__init__()
+        self.alpha = float(alpha)
+        self.mse = nn.MSELoss()
+        self.mae = nn.L1Loss()
+
+    def forward(self, pred, true):
+        return self.alpha * self.mse(pred, true) + (1.0 - self.alpha) * self.mae(pred, true)
 
 
 class Exp_Long_Term_Forecast(Exp_Basic):
@@ -426,8 +438,18 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         return diff.mean()
 
     def _select_criterion(self):
-        criterion = nn.MSELoss()
-        return criterion
+        loss_name = str(getattr(self.args, 'loss', 'MSE')).strip().lower()
+        if loss_name in {'mse', 'mseloss'}:
+            return nn.MSELoss()
+        if loss_name in {'mae', 'l1', 'l1loss'}:
+            return nn.L1Loss()
+        if loss_name in {'huber', 'smoothl1', 'smoothl1loss'}:
+            beta = float(getattr(self.args, 'huber_delta', 1.0))
+            return nn.SmoothL1Loss(beta=beta)
+        if loss_name in {'msemae', 'mse_mae', 'mixed'}:
+            alpha = float(getattr(self.args, 'loss_mse_weight', 0.5))
+            return _MSEMAELoss(alpha=alpha)
+        raise ValueError(f'Unsupported loss function: {getattr(self.args, "loss", None)}')
 
     def _validation_metric_loss(self, pred, true, criterion):
         mode = str(getattr(self.args, 'vali_metric_mode', 'all')).lower()
@@ -490,6 +512,150 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         total_loss = total_loss / max(1, total_elements)
         active_model.train()
         return total_loss
+
+    def _collect_test_predictions(self, test_data, test_loader, model=None):
+        active_model = self.model if model is None else model
+        was_training = active_model.training
+        preds = []
+        trues = []
+        active_model.eval()
+
+        with torch.no_grad():
+            for batch_x, batch_y, batch_x_mark, batch_y_mark in test_loader:
+                batch_x = batch_x.float().to(self.device)
+                batch_y = batch_y.float().to(self.device)
+                batch_x_mark = batch_x_mark.float().to(self.device)
+                batch_y_mark = batch_y_mark.float().to(self.device)
+                if getattr(self.args, 'data', None) == 'PEMS':
+                    batch_x_mark = None
+                    batch_y_mark = None
+
+                dec_inp = torch.zeros_like(
+                    batch_y[:, -self.args.pred_len:, :]
+                ).float()
+                dec_inp = torch.cat(
+                    [batch_y[:, :self.args.label_len, :], dec_inp],
+                    dim=1
+                ).float().to(self.device)
+
+                if self.args.use_amp and self.device.type == 'cuda':
+                    with torch.cuda.amp.autocast():
+                        outputs = active_model(
+                            batch_x,
+                            batch_x_mark,
+                            dec_inp,
+                            batch_y_mark
+                        )
+                else:
+                    outputs = active_model(
+                        batch_x,
+                        batch_x_mark,
+                        dec_inp,
+                        batch_y_mark
+                    )
+
+                f_dim = -1 if self.args.features == 'MS' else 0
+                outputs = outputs[:, -self.args.pred_len:, :]
+                batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
+                outputs = outputs.detach().cpu().numpy()
+                batch_y = batch_y.detach().cpu().numpy()
+
+                if (
+                    getattr(self.args, 'data', None) != 'PEMS'
+                    and test_data.scale
+                    and self.args.inverse
+                ):
+                    shape = batch_y.shape
+                    if outputs.shape[-1] != batch_y.shape[-1]:
+                        outputs = np.tile(
+                            outputs,
+                            [1, 1, int(batch_y.shape[-1] / outputs.shape[-1])]
+                        )
+                    outputs = test_data.inverse_transform(
+                        outputs.reshape(shape[0] * shape[1], -1)
+                    ).reshape(shape)
+                    batch_y = test_data.inverse_transform(
+                        batch_y.reshape(shape[0] * shape[1], -1)
+                    ).reshape(shape)
+
+                preds.append(outputs[:, :, f_dim:])
+                trues.append(batch_y[:, :, f_dim:])
+
+        preds = np.concatenate(preds, axis=0)
+        trues = np.concatenate(trues, axis=0)
+        preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
+        trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
+
+        if (
+            getattr(self.args, 'data', None) == 'PEMS'
+            and hasattr(test_data, 'inverse_transform')
+        ):
+            bsz, steps, channels = preds.shape
+            preds = test_data.inverse_transform(
+                preds.reshape(-1, channels)
+            ).reshape(bsz, steps, channels)
+            trues = test_data.inverse_transform(
+                trues.reshape(-1, channels)
+            ).reshape(bsz, steps, channels)
+
+        if was_training:
+            active_model.train()
+        return preds, trues
+
+    def _evaluate_test_metrics(self, test_data, test_loader, model=None):
+        preds, trues = self._collect_test_predictions(
+            test_data,
+            test_loader,
+            model=model
+        )
+        mae, mse, rmse, mape, mspe = metric(preds, trues)
+        return {
+            'mae': float(mae),
+            'mse': float(mse),
+            'rmse': float(rmse),
+            'mape': float(mape),
+            'mspe': float(mspe),
+        }
+
+    def _append_epoch_test_metrics(
+        self,
+        setting,
+        epoch,
+        elapsed_sec,
+        train_loss,
+        vali_loss,
+        test_metrics
+    ):
+        folder_path = os.path.join(self.args.results, setting)
+        os.makedirs(folder_path, exist_ok=True)
+        metrics_path = os.path.join(folder_path, 'epoch_test_metrics.csv')
+        fieldnames = [
+            'epoch',
+            'elapsed_sec',
+            'train_loss',
+            'vali_loss',
+            'test_mse',
+            'test_mae',
+            'test_rmse',
+            'test_mape',
+            'test_mspe',
+        ]
+        write_header = not os.path.exists(metrics_path)
+        with open(metrics_path, 'a', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            if write_header:
+                writer.writeheader()
+            writer.writerow({
+                'epoch': epoch,
+                'elapsed_sec': elapsed_sec,
+                'train_loss': train_loss,
+                'vali_loss': vali_loss,
+                'test_mse': test_metrics['mse'],
+                'test_mae': test_metrics['mae'],
+                'test_rmse': test_metrics['rmse'],
+                'test_mape': test_metrics['mape'],
+                'test_mspe': test_metrics['mspe'],
+            })
 
     @staticmethod
     def _update_ema_model(ema_model, model, decay):
@@ -555,6 +721,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         )
         global_train_step = 0
         step_budget_reached = False
+        test_every_epoch = bool(getattr(self.args, 'test_every_epoch', 1))
 
         for epoch in range(self.args.train_epochs):
             if self.args.lradj == 'warmup_cosine':
@@ -729,17 +896,48 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     ).format(raw_vali_loss, ema_vali_loss)
                 print(message)
             else:
-                test_loss = self.vali(test_data, test_loader, criterion)
-                print(
-                    "Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} "
-                    "Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
+                if test_every_epoch:
+                    test_model = ema_model if ema_model is not None else self.model
+                    test_metrics = self._evaluate_test_metrics(
+                        test_data,
+                        test_loader,
+                        model=test_model
+                    )
+                    self._append_epoch_test_metrics(
+                        setting,
                         epoch + 1,
-                        train_steps,
+                        time.time() - epoch_time,
                         train_loss,
                         vali_loss,
-                        test_loss
+                        test_metrics
                     )
-                )
+                    print(
+                        "Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} "
+                        "Vali Loss: {3:.7f} Test MSE: {4:.7f} "
+                        "Test MAE: {5:.7f} Test RMSE: {6:.7f} "
+                        "Test MAPE: {7:.7f}".format(
+                            epoch + 1,
+                            train_steps,
+                            train_loss,
+                            vali_loss,
+                            test_metrics['mse'],
+                            test_metrics['mae'],
+                            test_metrics['rmse'],
+                            test_metrics['mape']
+                        )
+                    )
+                else:
+                    test_loss = self.vali(test_data, test_loader, criterion)
+                    print(
+                        "Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} "
+                        "Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
+                            epoch + 1,
+                            train_steps,
+                            train_loss,
+                            vali_loss,
+                            test_loss
+                        )
+                    )
             checkpoint_model = ema_model if ema_model is not None else self.model
             if bool(getattr(self.args, 'save_epoch_checkpoints', 0)):
                 save_epoch_start = max(

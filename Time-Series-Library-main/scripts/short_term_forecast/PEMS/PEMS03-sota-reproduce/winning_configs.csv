@@ -1,0 +1,2 @@
+dataset,subset_or_pred_len,mae,mape,rmse,timemixerpp_mae,timemixerpp_mape,timemixerpp_rmse,win_count,status,trial,epoch,wrapper,updated_at
+PEMS03,12,14.5471410751,13.4437322617,23.6375279387,13.9900000000,13.4300000000,24.0300000000,1,fresh_not_accepted_archive_2_of_3,P3B44_02_bias0450,12,reproduce_pems03.sh,2026-07-31

@@ -181,6 +181,8 @@ def build_parser():
     parser.add_argument("--ema_start_epoch", type=int, default=1)
     parser.add_argument("--des", type=str, default="TSCAN_RELEASE")
     parser.add_argument("--loss", type=str, default="MSE")
+    parser.add_argument("--huber_delta", type=float, default=1.0)
+    parser.add_argument("--loss_mse_weight", type=float, default=0.5)
     parser.add_argument(
         "--lradj",
         type=str,
@@ -189,6 +191,12 @@ def build_parser():
     )
     parser.add_argument("--use_amp", action="store_true", default=False)
     parser.add_argument("--validation_only", type=int, default=0)
+    parser.add_argument(
+        "--test_every_epoch",
+        type=int,
+        default=1,
+        help="evaluate full test metrics after every epoch and save epoch_test_metrics.csv",
+    )
     parser.add_argument("--use_dtw", action="store_true", default=False)
 
     parser.add_argument("--use_gpu", action="store_true", default=True)

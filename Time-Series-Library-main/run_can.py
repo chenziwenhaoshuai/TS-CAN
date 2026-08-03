@@ -530,6 +530,12 @@ def build_parser():
     p.add_argument("--use_amp", action="store_true", default=False)
     p.add_argument("--validation_only", type=int, default=0)
     p.add_argument(
+        "--test_every_epoch",
+        type=int,
+        default=1,
+        help="evaluate full test metrics after every epoch and save epoch_test_metrics.csv",
+    )
+    p.add_argument(
         "--vali_metric_mode",
         type=str,
         default="all",
