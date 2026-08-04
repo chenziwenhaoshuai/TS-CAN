@@ -52,6 +52,7 @@ python -u run.py \
   --learning_rate 0.0022 \
   --lradj cosine \
   --train_epochs 10 \
+  --stop_after_epochs 7 \
   --patience 999 \
   --loss MAE \
   --optimizer adam \
