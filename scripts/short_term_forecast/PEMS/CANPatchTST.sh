@@ -36,7 +36,7 @@ python -u run.py \
   --can_temporal_cli_mode inner \
   --can_context_pyramid 0 \
   --can_multiscale_patch_lens 8,16 \
-  --can_multiscale_main_bias 0.50 \
+  --can_multiscale_main_bias 0.49 \
   --can_cross_var 1 \
   --can_cross_var_layers 1 \
   --can_cross_var_context others_mean \
