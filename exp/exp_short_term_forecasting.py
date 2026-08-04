@@ -371,17 +371,22 @@ class Exp_Short_Term_Forecast(Exp_Basic):
 
         print(self.args.model)
         file_path = './m4_results/' + self.args.model + '/'
-        if 'Weekly_forecast.csv' in os.listdir(file_path) \
-                and 'Monthly_forecast.csv' in os.listdir(file_path) \
-                and 'Yearly_forecast.csv' in os.listdir(file_path) \
-                and 'Daily_forecast.csv' in os.listdir(file_path) \
-                and 'Hourly_forecast.csv' in os.listdir(file_path) \
-                and 'Quarterly_forecast.csv' in os.listdir(file_path):
+        current_forecast = self.args.seasonal_patterns + '_forecast.csv'
+        if current_forecast in os.listdir(file_path):
             smape_results, owa_results, mape, mase = _evaluate_m4_summary(file_path, self.args.root_path)
             print('smape:', smape_results)
             print('mape:', mape)
             print('mase:', mase)
             print('owa:', owa_results)
+            if not (
+                    'Weekly_forecast.csv' in os.listdir(file_path)
+                    and 'Monthly_forecast.csv' in os.listdir(file_path)
+                    and 'Yearly_forecast.csv' in os.listdir(file_path)
+                    and 'Daily_forecast.csv' in os.listdir(file_path)
+                    and 'Hourly_forecast.csv' in os.listdir(file_path)
+                    and 'Quarterly_forecast.csv' in os.listdir(file_path)
+            ):
+                print('After all 6 tasks are finished, you can calculate the averaged index')
         else:
             print('After all 6 tasks are finished, you can calculate the averaged index')
         return
