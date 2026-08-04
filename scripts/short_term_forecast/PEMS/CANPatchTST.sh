@@ -54,7 +54,6 @@ python -u run.py \
   --train_epochs 10 \
   --patience 999 \
   --loss MAE \
-  --select_best_by_test_metric mae \
   --optimizer adam \
   --weight_decay 0.0 \
   --weight_averaging none \
@@ -120,7 +119,6 @@ python -u run.py \
   --train_epochs 34 \
   --patience 999 \
   --loss MAE \
-  --select_best_by_test_metric mae \
   --optimizer adam \
   --weight_decay 0.0 \
   --weight_averaging swa \

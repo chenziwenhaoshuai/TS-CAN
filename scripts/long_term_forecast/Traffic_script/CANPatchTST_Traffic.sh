@@ -124,7 +124,6 @@ python -u run.py \
   --lradj cosine \
   --train_epochs 24 \
   --patience 6 \
-  --select_best_by_test_metric mse \
   --num_workers 0 \
   --itr 1 \
   --seed 2 \
