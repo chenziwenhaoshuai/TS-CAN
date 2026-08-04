@@ -3,6 +3,7 @@ set -euo pipefail
 
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 export HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
+export CUBLAS_WORKSPACE_CONFIG=${CUBLAS_WORKSPACE_CONFIG:-:4096:8}
 
 model_name=CANPatchTST
 
@@ -95,6 +96,7 @@ python -u run.py \
   --patience 58 \
   --loss SMAPE \
   --loss_schedule SMAPE:20,MASE:30,OWA:5,MASE:5 \
+  --deterministic \
   --seed 2 \
   --num_workers 0
 

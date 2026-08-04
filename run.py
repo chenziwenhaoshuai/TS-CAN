@@ -162,6 +162,8 @@ if __name__ == '__main__':
     # Augmentation
     parser.add_argument('--augmentation_ratio', type=int, default=0, help="How many times to augment")
     parser.add_argument('--seed', type=int, default=2, help="Randomization seed")
+    parser.add_argument('--deterministic', action='store_true', default=False,
+                        help='enable deterministic CUDA algorithms for reproducibility')
     parser.add_argument('--jitter', default=False, action="store_true", help="Jitter preset augmentation")
     parser.add_argument('--scaling', default=False, action="store_true", help="Scaling preset augmentation")
     parser.add_argument('--permutation', default=False, action="store_true",
@@ -280,6 +282,12 @@ if __name__ == '__main__':
     random.seed(args.seed)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+    if args.deterministic:
+        os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
+        torch.cuda.manual_seed_all(args.seed)
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.use_deterministic_algorithms(True, warn_only=True)
     if torch.cuda.is_available() and args.use_gpu:
         args.device = torch.device('cuda:{}'.format(args.gpu))
         print('Using GPU')
