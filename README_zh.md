@@ -1,20 +1,52 @@
-# TS-CAN ⚡
+<div align="center">
 
-**面向时间序列预测的 Clifford Algebra Network**
+<h1>TS-CAN ⚡</h1>
 
-TS-CAN 是一个基于 Time-Series-Library 评测体系实现的紧凑型时间序列预测模型。它用 Clifford 几何代数启发的交互模块替代通用的 token mixing，使变量关系和时间关系都通过几何乘积的两个组成部分建模：inner 分支刻画同向协同变化，wedge 分支刻画方向性差异。
+<p><strong>面向时间序列预测的 Clifford Algebra Network</strong></p>
 
-本仓库提供一份干净的 TSLib 兼容实现，包含模型代码、数据加载支持、长期预测脚本、短期预测脚本和当前结果的可复现配置。
+<p>
+  <img src="https://img.shields.io/badge/模型-TS--CAN-7c3aed" alt="TS-CAN" />
+  <img src="https://img.shields.io/badge/框架-TSLib-0f766e" alt="TSLib" />
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+" />
+  <img src="https://img.shields.io/badge/PyTorch-CUDA-ee4c2c?logo=pytorch&logoColor=white" alt="PyTorch CUDA" />
+  <img src="https://img.shields.io/badge/长期预测-29%2F32%20MSE%20胜-blue" alt="长期预测 29/32 MSE 胜" />
+  <img src="https://img.shields.io/badge/短期预测-6%2F6%202--of--3%20胜-f59e0b" alt="短期预测 6/6 胜" />
+</p>
 
-## ✨ 核心特点
+<p>
+  <a href="README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English" /></a>
+  <a href="README_zh.md"><img src="https://img.shields.io/badge/语言-简体中文-red.svg" alt="简体中文" /></a>
+</p>
+
+<p>
+  一份干净、可复现、兼容 TSLib 的 TS-CAN 实现，包含长期预测与短期预测脚本、调优配置和报告指标。
+</p>
+
+</div>
+
+<!-- README_SYNC: 修改 README_zh.md 时请同步 README.md。 -->
+
+<a id="overview"></a>
+
+## 项目概览 🧭
+
+TS-CAN 是一个基于 Time-Series-Library 评测体系实现的紧凑型时间序列预测模型。它用 Clifford 几何代数启发的交互模块替代通用 token mixing，使变量关系和时间关系都通过几何乘积的两个组成部分建模：inner 分支刻画同向协同变化，wedge 分支刻画方向性差异。
+
+本仓库刻意保持接近官方 TSLib 的组织方式：标准 `run.py`，标准 `scripts/`，不引入外部 teacher 融合，不提交 checkpoint、结果缓存或探索性 sweep 产物。
+
+<a id="highlights"></a>
+
+## 核心特点 ✨
 
 - 🔷 **几何交互核心。** TS-CAN 使用 inner 与 wedge 两类 Clifford 启发交互，而不是普通注意力或 MLP mixing。
 - 🔁 **变量与时间双路径建模。** 同一套几何交互思想同时作用于跨变量关系和跨时间 patch 状态。
-- 🧩 **高效 patch 输入接口。** 模型保留 PatchTST 风格的输入形式，但核心交互块替换为 CAN 模块。
+- 🧩 **高效 patch 输入接口。** TS-CAN 保留 PatchTST 风格的输入形式，但核心交互块替换为 CAN 模块。
 - ✅ **不依赖 teacher 融合。** 当前报告结果来自 TS-CAN 本身，不是与 TimeMixer++ 或其他模型融合得到。
-- 🔌 **兼容 TSLib。** 使用标准 `run.py` 入口和 `scripts/` 目录脚本即可运行。
+- 🔌 **兼容 TSLib。** 使用标准 `run.py` 入口和常规 `scripts/` 目录即可运行。
 
-## 🧠 模型结构
+<a id="architecture"></a>
+
+## 模型结构 🧠
 
 TS-CAN 将隐藏状态视为几何对象。给定状态 `s` 和上下文 `c`，Clifford 交互被分解为：
 
@@ -25,15 +57,13 @@ wedge branch:  s * roll(c) - c * roll(s)
 
 inner 分支用于捕捉共同变化和幅值对齐关系；wedge 分支用于捕捉方向差异、相位错位、滞后依赖和局部趋势变化。模型会在多个循环位移尺度上计算这些几何特征，并投影回模型维度。
 
-当前实现支持：
-
-- 变量维度 Clifford 交互：`--can_cli_mode`
-- 时间维度 Clifford 交互：`--can_temporal_cli_mode`
-- 时间 rolling 上下文：`--can_temporal_roll`
-- 多尺度 patch 上下文：`--can_multiscale_patch_lens`
-- 跨变量上下文：`--can_cross_var`
-- 面向短期预测的 periodic 和 linear residual 路径
-- dropout 与 stochastic depth 控制
+| 模块 | 作用 | 主要参数 |
+|---|---|---|
+| 变量维度 Clifford 交互 | 跨变量几何 mixing | `--can_cli_mode`, `--can_ctx_mode` |
+| 时间维度 Clifford 交互 | patch-time 几何 mixing | `--can_temporal_cli_mode`, `--can_temporal_roll` |
+| 多尺度上下文 | 多个局部时间分辨率 | `--can_multiscale_patch_lens`, `--can_context_pyramid` |
+| 跨变量上下文 | Traffic/PEMS 风格变量依赖 | `--can_cross_var`, `--can_cross_var_context` |
+| 残差先验 | 支持短期预测的周期与线性路径 | `--can_periodic_residual`, `--can_linear_residual` |
 
 主模型文件：
 
@@ -41,12 +71,30 @@ inner 分支用于捕捉共同变化和幅值对齐关系；wedge 分支用于�
 models/CANPatchTST.py
 ```
 
-## 🛠️ 安装
+<a id="default-version"></a>
+
+## 默认版本 📦
+
+| 分支 | 入口 | 范围 |
+|---|---|---|
+| `main` | `python -u run.py ... --model CANPatchTST` | 干净的 TSLib 兼容版本 |
+
+当前发布版本只包含模型代码、数据加载改动、实验循环支持和启动脚本，不包含数据集、checkpoint、结果文件或探索性实验产物。
+
+<a id="quick-start"></a>
+
+## 快速开始 🚀
+
+### 1. 获取项目 📥
 
 ```bash
 git clone https://github.com/chenziwenhaoshuai/TS-CAN.git
 cd TS-CAN
+```
 
+### 2. 创建环境 🛠️
+
+```bash
 conda create -n tslib python=3.10 -y
 conda activate tslib
 
@@ -54,13 +102,11 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 pip install -r requirements.txt
 ```
 
-实验在 NVIDIA RTX 4090 D GPU 和 PyTorch CUDA 环境下验证。其他较新的 CUDA/PyTorch 环境通常也可以运行，但具体数值可能存在轻微差异。
+实验在 NVIDIA RTX 4090 D GPU 和 PyTorch CUDA 环境下验证。其他较新的 CUDA/PyTorch 环境通常也可以运行，但不同 CUDA、driver 和 PyTorch 版本可能带来小幅指标差异。
 
-## 📦 数据准备
+### 3. 准备数据 📦
 
 下载 TSLib 数据集并放到 `./dataset` 目录。
-
-推荐使用 Hugging Face 镜像：
 
 ```bash
 export HF_ENDPOINT=https://hf-mirror.com
@@ -72,7 +118,7 @@ export HF_ENDPOINT=https://hf-mirror.com
 https://huggingface.co/datasets/thuml/Time-Series-Library
 ```
 
-期望目录结构包括：
+期望目录：
 
 ```text
 dataset/ETT-small/ETTh1.csv
@@ -88,31 +134,26 @@ dataset/PEMS/PEMS03.npz
 dataset/PEMS/PEMS08.npz
 ```
 
-## 🚀 复现方式
+<a id="reproduction"></a>
 
-所有启动脚本位于 `scripts/` 目录。
+## 复现方式 🚀
 
-### 📈 长期预测
-
-运行 ETT 四个数据集：
+### 长期预测 📈
 
 ```bash
 bash scripts/long_term_forecast/ETT_script/CANPatchTST_ETTh1.sh
 bash scripts/long_term_forecast/ETT_script/CANPatchTST_ETTh2.sh
 bash scripts/long_term_forecast/ETT_script/CANPatchTST_ETTm1.sh
 bash scripts/long_term_forecast/ETT_script/CANPatchTST_ETTm2.sh
-```
 
-运行扩展数据集：
-
-```bash
 bash scripts/long_term_forecast/ECL_script/CANPatchTST_ECL.sh
 bash scripts/long_term_forecast/Exchange_script/CANPatchTST_Exchange.sh
 bash scripts/long_term_forecast/Traffic_script/CANPatchTST_Traffic.sh
 bash scripts/long_term_forecast/Weather_script/CANPatchTST_Weather.sh
 ```
 
-单个实验示例：
+<details>
+<summary><strong>单个 ETTh1-96 命令</strong></summary>
 
 ```bash
 python -u run.py \
@@ -152,27 +193,24 @@ python -u run.py \
   --num_workers 0
 ```
 
-### ⏱️ 短期预测
+</details>
 
-M4：
+### 短期预测 ⏱️
 
 ```bash
 bash scripts/short_term_forecast/CANPatchTST_M4.sh
-```
-
-PEMS：
-
-```bash
 bash scripts/short_term_forecast/CANPatchTST_PEMS.sh
 ```
 
-说明：M4 使用 TSLib 的 `short_term_forecast` 任务。PEMS 对应 TimeMixer++ 短期预测表格协议，但在代码中通过固定预测长度 `pred_len=12` 的 `long_term_forecast` runner 执行。
+M4 使用 TSLib 的 `short_term_forecast` 任务。PEMS 对应 TimeMixer++ 短期预测表格协议，但在代码中通过固定预测长度 `pred_len=12` 的 `long_term_forecast` runner 执行。
 
-## 🏆 实验结果
+<a id="results"></a>
+
+## 实验结果 🏆
 
 长期预测报告 `MSE/MAE`。M4 短期预测报告 `SMAPE/MASE/OWA`。PEMS 报告 `MAE/MAPE/RMSE`。所有指标越低越好。
 
-### 📈 长期预测与 TimeMixer++ 对比
+### 长期预测与 TimeMixer++ 对比 📊
 
 TS-CAN 在长期预测中取得 **29/32 个 MSE 优势**。原始指标如下；剩余 MSE 未超过的设置为 ETTh2 的 96、192 和 336。
 
@@ -211,7 +249,7 @@ TS-CAN 在长期预测中取得 **29/32 个 MSE 优势**。原始指标如下；
 | ETTm2 | 336 | **0.280/0.330** | 0.303/0.343 |
 | ETTm2 | 720 | **0.357/0.388** | 0.373/0.399 |
 
-### ⏱️ 短期预测与 TimeMixer++ 对比
+### 短期预测与 TimeMixer++ 对比 📊
 
 TS-CAN 在所有报告的短期预测设置上，均至少有三个指标中的两个优于 TimeMixer++。下表给出原始指标。
 
@@ -224,7 +262,9 @@ TS-CAN 在所有报告的短期预测设置上，均至少有三个指标中的�
 | PEMS03 | 14.476/**13.397/23.292** | **13.990**/13.430/24.030 |
 | PEMS08 | **13.721**/8.945/**23.011** | 13.810/**8.210**/23.620 |
 
-## 🔁 复现说明
+<a id="notes"></a>
+
+## 复现说明 🔁
 
 - 脚本中已固定可控随机种子。
 - 部分配置启用了 CUDA AMP。
@@ -232,22 +272,35 @@ TS-CAN 在所有报告的短期预测设置上，均至少有三个指标中的�
 - 长期预测表中的 `Traffic-336` 来自 checkpoint-test 评估；fresh final checkpoint 的 MSE 仍优于 TimeMixer++。
 - PEMS 结果采用短期预测协议下的 final test 指标。
 
-## 🗂️ 仓库结构
+<a id="layout"></a>
+
+## 仓库结构 🗂️
 
 ```text
-models/CANPatchTST.py
-data_provider/
-exp/
-scripts/long_term_forecast/
-scripts/short_term_forecast/CANPatchTST_M4.sh
-scripts/short_term_forecast/CANPatchTST_PEMS.sh
-run.py
+TS-CAN/
+├── README.md / README_zh.md
+├── run.py
+├── models/CANPatchTST.py
+├── data_provider/
+├── exp/
+├── scripts/long_term_forecast/
+│   ├── ETT_script/CANPatchTST_ETTh1.sh
+│   ├── ETT_script/CANPatchTST_ETTh2.sh
+│   ├── ETT_script/CANPatchTST_ETTm1.sh
+│   ├── ETT_script/CANPatchTST_ETTm2.sh
+│   ├── ECL_script/CANPatchTST_ECL.sh
+│   ├── Exchange_script/CANPatchTST_Exchange.sh
+│   ├── Traffic_script/CANPatchTST_Traffic.sh
+│   └── Weather_script/CANPatchTST_Weather.sh
+└── scripts/short_term_forecast/
+    ├── CANPatchTST_M4.sh
+    └── CANPatchTST_PEMS.sh
 ```
 
-## 📚 引用
+## 引用 📚
 
 如果本仓库对你的研究有帮助，请引用 TS-CAN 以及 Time-Series-Library 的基准框架。论文元信息确定后会补充 BibTeX。
 
-## 🙏 致谢
+## 致谢 🙏
 
 本实现基于 Time-Series-Library 构建。感谢 TSLib 作者和时间序列预测社区对标准化评测基础设施的维护。

@@ -1,6 +1,35 @@
-# TS-CAN ⚡
+<div align="center">
 
-**Clifford Algebra Networks for Time Series Forecasting**
+<h1>TS-CAN ⚡</h1>
+
+<p><strong>Clifford Algebra Networks for Time Series Forecasting</strong></p>
+
+<p>
+  <img src="https://img.shields.io/badge/Model-TS--CAN-7c3aed" alt="TS-CAN" />
+  <img src="https://img.shields.io/badge/Backbone-TSLib-0f766e" alt="TSLib" />
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+" />
+  <img src="https://img.shields.io/badge/PyTorch-CUDA-ee4c2c?logo=pytorch&logoColor=white" alt="PyTorch CUDA" />
+  <img src="https://img.shields.io/badge/Long--term-29%2F32%20MSE%20wins-blue" alt="Long-term 29/32 MSE wins" />
+  <img src="https://img.shields.io/badge/Short--term-6%2F6%202--of--3%20wins-f59e0b" alt="Short-term 6/6 wins" />
+</p>
+
+<p>
+  <a href="README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English" /></a>
+  <a href="README_zh.md"><img src="https://img.shields.io/badge/语言-简体中文-red.svg" alt="简体中文" /></a>
+</p>
+
+<p>
+  A clean, reproducible TSLib implementation of TS-CAN, with long-term and
+  short-term forecasting scripts, tuned configurations, and reported metrics.
+</p>
+
+</div>
+
+<!-- README_SYNC: when updating README.md, keep README_zh.md aligned. -->
+
+<a id="overview"></a>
+
+## Overview 🧭
 
 TS-CAN is a compact forecasting model built on top of the Time-Series-Library
 benchmark stack. It replaces generic token mixing with Clifford-style geometric
@@ -8,24 +37,28 @@ interactions, so channel and temporal relationships are modeled through the two
 parts of the geometric product: an inner-product branch for aligned variation
 and a wedge-product branch for directional discrepancy.
 
-This repository contains a clean TSLib-compatible implementation of TS-CAN,
-including long-term and short-term forecasting scripts, data-loader support,
-and reproduction configurations for the reported results.
+The repository is intentionally kept close to official TSLib: standard
+`run.py`, standard `scripts/`, no external teacher fusion, no checkpoint or
+result artifacts committed.
 
-## ✨ Highlights
+<a id="highlights"></a>
 
-- 🔷 **Geometric interaction core.** TS-CAN uses Clifford-inspired inner and wedge
-  interactions instead of plain attention or MLP mixing.
-- 🔁 **Channel and temporal Clifford mixing.** The same algebraic principle is used
-  across variables and across patch-time states.
-- 🧩 **Patch-based efficient backbone.** The model follows a PatchTST-style input
+## Highlights ✨
+
+- 🔷 **Geometric interaction core.** TS-CAN uses Clifford-inspired inner and
+  wedge interactions instead of plain attention or MLP mixing.
+- 🔁 **Channel and temporal Clifford mixing.** The same algebraic principle is
+  applied across variables and across patch-time states.
+- 🧩 **Patch-based efficient backbone.** TS-CAN keeps the PatchTST-style input
   interface while replacing the central interaction block with CAN modules.
-- ✅ **Multi-scale context without teacher fusion.** Reported configurations use
-  TS-CAN itself, not an ensemble or fusion with TimeMixer++.
-- 🔌 **TSLib compatible.** Experiments run with the standard `run.py` entry point
-  and the usual `scripts/` layout.
+- ✅ **No teacher fusion.** Reported results come from TS-CAN itself, not an
+  ensemble or fusion with TimeMixer++.
+- 🔌 **TSLib compatible.** Experiments run through the standard `run.py` entry
+  point and the usual `scripts/` layout.
 
-## 🧠 Model
+<a id="architecture"></a>
+
+## Architecture 🧠
 
 TS-CAN treats the hidden time-series state as a geometric object. Given a state
 `s` and context `c`, the Clifford interaction decomposes their relation into:
@@ -41,28 +74,46 @@ with phase shifts, lagged dependencies, or changing local trends. TS-CAN applies
 these interactions with multiple cyclic shifts and projects the concatenated
 geometric features back into the model dimension.
 
-The implemented model also supports:
+| Module | Purpose | Main flags |
+|---|---|---|
+| Channel Clifford interaction | Cross-variable geometric mixing | `--can_cli_mode`, `--can_ctx_mode` |
+| Temporal Clifford interaction | Patch-time geometric mixing | `--can_temporal_cli_mode`, `--can_temporal_roll` |
+| Multi-scale context | Multiple local resolutions | `--can_multiscale_patch_lens`, `--can_context_pyramid` |
+| Cross-variable context | Traffic/PEMS-style variable dependency | `--can_cross_var`, `--can_cross_var_context` |
+| Residual priors | Short-term periodic and linear support | `--can_periodic_residual`, `--can_linear_residual` |
 
-- channel Clifford interaction (`--can_cli_mode`)
-- temporal Clifford interaction (`--can_temporal_cli_mode`)
-- temporal rolling context (`--can_temporal_roll`)
-- multi-scale patch context (`--can_multiscale_patch_lens`)
-- cross-variable context (`--can_cross_var`)
-- periodic and linear residual paths for short-term forecasting
-- stochastic depth and dropout controls
-
-The main implementation is in:
+Main implementation:
 
 ```text
 models/CANPatchTST.py
 ```
 
-## 🛠️ Installation
+<a id="default-version"></a>
+
+## Default Version 📦
+
+| Branch | Entry | Scope |
+|---|---|---|
+| `main` | `python -u run.py ... --model CANPatchTST` | Clean TSLib-compatible release |
+
+The current release contains model code, data-loader changes, experiment-loop
+support, and launch scripts only. It does not include datasets, checkpoints,
+cached results, or exploratory sweep artifacts.
+
+<a id="quick-start"></a>
+
+## Quick Start 🚀
+
+### 1. Clone the repository 📥
 
 ```bash
 git clone https://github.com/chenziwenhaoshuai/TS-CAN.git
 cd TS-CAN
+```
 
+### 2. Create the environment 🛠️
+
+```bash
 conda create -n tslib python=3.10 -y
 conda activate tslib
 
@@ -70,14 +121,13 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 pip install -r requirements.txt
 ```
 
-The experiments were verified on NVIDIA RTX 4090 D GPUs with PyTorch in a CUDA
-environment. Other recent CUDA-enabled PyTorch environments should also work.
+The verified environment uses NVIDIA RTX 4090 D GPUs with PyTorch CUDA. Other
+recent CUDA-enabled PyTorch environments should also work, although small metric
+differences can appear across CUDA, driver, and PyTorch versions.
 
-## 📦 Data
+### 3. Prepare data 📦
 
 Download the TSLib datasets and place them under `./dataset`.
-
-Recommended mirror:
 
 ```bash
 export HF_ENDPOINT=https://hf-mirror.com
@@ -89,7 +139,7 @@ Dataset source:
 https://huggingface.co/datasets/thuml/Time-Series-Library
 ```
 
-Expected paths include:
+Expected paths:
 
 ```text
 dataset/ETT-small/ETTh1.csv
@@ -105,31 +155,26 @@ dataset/PEMS/PEMS03.npz
 dataset/PEMS/PEMS08.npz
 ```
 
-## 🚀 Reproduction
+<a id="reproduction"></a>
 
-All scripts are under `scripts/`.
+## Reproduction 🚀
 
-### 📈 Long-Term Forecasting
-
-Run the ETT benchmarks:
+### Long-term forecasting 📈
 
 ```bash
 bash scripts/long_term_forecast/ETT_script/CANPatchTST_ETTh1.sh
 bash scripts/long_term_forecast/ETT_script/CANPatchTST_ETTh2.sh
 bash scripts/long_term_forecast/ETT_script/CANPatchTST_ETTm1.sh
 bash scripts/long_term_forecast/ETT_script/CANPatchTST_ETTm2.sh
-```
 
-Run the extended benchmarks:
-
-```bash
 bash scripts/long_term_forecast/ECL_script/CANPatchTST_ECL.sh
 bash scripts/long_term_forecast/Exchange_script/CANPatchTST_Exchange.sh
 bash scripts/long_term_forecast/Traffic_script/CANPatchTST_Traffic.sh
 bash scripts/long_term_forecast/Weather_script/CANPatchTST_Weather.sh
 ```
 
-Single-command example:
+<details>
+<summary><strong>Single ETTh1-96 command</strong></summary>
 
 ```bash
 python -u run.py \
@@ -169,34 +214,31 @@ python -u run.py \
   --num_workers 0
 ```
 
-### ⏱️ Short-Term Forecasting
+</details>
 
-M4:
+### Short-term forecasting ⏱️
 
 ```bash
 bash scripts/short_term_forecast/CANPatchTST_M4.sh
-```
-
-PEMS:
-
-```bash
 bash scripts/short_term_forecast/CANPatchTST_PEMS.sh
 ```
 
-Note: M4 uses TSLib's `short_term_forecast` task. PEMS follows the TimeMixer++
+M4 uses TSLib's `short_term_forecast` task. PEMS follows the TimeMixer++
 short-term table protocol, but is executed through the fixed-horizon
 `long_term_forecast` runner with `pred_len=12`.
 
-## 🏆 Results
+<a id="results"></a>
+
+## Results 🏆
 
 Long-term forecasting reports `MSE/MAE`. Short-term M4 reports
 `SMAPE/MASE/OWA`. PEMS reports `MAE/MAPE/RMSE`. Lower is better.
 
-### 📈 Long-Term Forecasting vs TimeMixer++
+### Long-term forecasting vs TimeMixer++ 📊
 
 TS-CAN achieves **29/32 MSE wins** against the TimeMixer++ long-term forecasting
-table. The raw metrics are shown below. The remaining MSE losses are ETTh2
-at horizons 96, 192, and 336.
+table. The raw metrics are shown below. The remaining MSE losses are ETTh2 at
+horizons 96, 192, and 336.
 
 | Dataset | Horizon | TS-CAN | TimeMixer++ |
 |---|---:|---:|---:|
@@ -233,7 +275,7 @@ at horizons 96, 192, and 336.
 | ETTm2 | 336 | **0.280/0.330** | 0.303/0.343 |
 | ETTm2 | 720 | **0.357/0.388** | 0.373/0.399 |
 
-### ⏱️ Short-Term Forecasting vs TimeMixer++
+### Short-term forecasting vs TimeMixer++ 📊
 
 TS-CAN wins at least two out of three metrics on all reported short-term
 benchmarks; the table below reports the raw metrics.
@@ -247,7 +289,9 @@ benchmarks; the table below reports the raw metrics.
 | PEMS03 | 14.476/**13.397/23.292** | **13.990**/13.430/24.030 |
 | PEMS08 | **13.721**/8.945/**23.011** | 13.810/**8.210**/23.620 |
 
-## 🔁 Reproducibility Notes
+<a id="notes"></a>
+
+## Reproducibility Notes 🔁
 
 - Scripts use fixed seeds where supported.
 - CUDA AMP is enabled in several reproduction scripts.
@@ -257,25 +301,38 @@ benchmarks; the table below reports the raw metrics.
   fresh final checkpoint remains above the TimeMixer++ MSE baseline.
 - PEMS is reported with the final test metrics used by the short-term protocol.
 
-## 🗂️ Repository Layout
+<a id="layout"></a>
+
+## Repository Layout 🗂️
 
 ```text
-models/CANPatchTST.py
-data_provider/
-exp/
-scripts/long_term_forecast/
-scripts/short_term_forecast/CANPatchTST_M4.sh
-scripts/short_term_forecast/CANPatchTST_PEMS.sh
-run.py
+TS-CAN/
+├── README.md / README_zh.md
+├── run.py
+├── models/CANPatchTST.py
+├── data_provider/
+├── exp/
+├── scripts/long_term_forecast/
+│   ├── ETT_script/CANPatchTST_ETTh1.sh
+│   ├── ETT_script/CANPatchTST_ETTh2.sh
+│   ├── ETT_script/CANPatchTST_ETTm1.sh
+│   ├── ETT_script/CANPatchTST_ETTm2.sh
+│   ├── ECL_script/CANPatchTST_ECL.sh
+│   ├── Exchange_script/CANPatchTST_Exchange.sh
+│   ├── Traffic_script/CANPatchTST_Traffic.sh
+│   └── Weather_script/CANPatchTST_Weather.sh
+└── scripts/short_term_forecast/
+    ├── CANPatchTST_M4.sh
+    └── CANPatchTST_PEMS.sh
 ```
 
-## 📚 Citation
+## Citation 📚
 
 If you use this repository, please cite TS-CAN and the Time-Series-Library
 benchmark infrastructure. A BibTeX entry will be added after the paper metadata
 is finalized.
 
-## 🙏 Acknowledgement
+## Acknowledgement 🙏
 
 This implementation is built on the Time-Series-Library codebase. We thank the
 TSLib authors and the broader time-series forecasting community for maintaining
