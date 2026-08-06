@@ -333,13 +333,13 @@ benchmarks; the table below reports the raw metrics.
 Anomaly detection reports `Precision/Recall/F1` in percent. TS-CAN uses the
 verified release scripts under `scripts/anomaly_detection/*/CANPatchTST.sh`.
 
-| Dataset | TS-CAN | TimeMixer++ |
-|---|---:|---:|
-| SMD | 83.50/90.90/**87.04** | 88.59/84.50/86.50 |
-| MSL | 94.29/79.28/**86.14** | 89.73/82.23/85.82 |
-| SMAP | 92.58/60.45/**73.14** | 93.47/60.02/73.10 |
-| SWAT | 96.02/93.83/**94.91** | 92.96/94.33/94.64 |
-| PSM | 98.09/97.14/**97.61** | 98.33/96.90/97.60 |
+| Dataset | TS-CAN P | TS-CAN R | TS-CAN F1 | TimeMixer++ P | TimeMixer++ R | TimeMixer++ F1 |
+|---|---:|---:|---:|---:|---:|---:|
+| SMD | 83.50 | **90.90** | **87.04** | **88.59** | 84.50 | 86.50 |
+| MSL | **94.29** | 79.28 | **86.14** | 89.73 | **82.23** | 85.82 |
+| SMAP | 92.58 | **60.45** | **73.14** | **93.47** | 60.02 | 73.10 |
+| SWAT | **96.02** | 93.83 | **94.91** | 92.96 | **94.33** | 94.64 |
+| PSM | 98.09 | **97.14** | **97.61** | **98.33** | 96.90 | 97.60 |
 
 <a id="notes"></a>
 
