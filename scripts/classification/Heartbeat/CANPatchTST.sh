@@ -1,0 +1,32 @@
+export CUDA_VISIBLE_DEVICES=0
+
+python -u run.py \
+  --task_name classification \
+  --is_training 1 \
+  --root_path ./dataset/Heartbeat/ \
+  --model_id Heartbeat \
+  --model CANPatchTST \
+  --data UEA \
+  --e_layers 2 \
+  --batch_size 8 \
+  --d_model 64 \
+  --d_ff 128 \
+  --patch_len 8 \
+  --can_stride 4 \
+  --can_cls_head pool \
+  --can_shifts 1,2,4,8,16 \
+  --can_cli_mode full \
+  --can_temporal_cli_mode full \
+  --can_temporal_roll 1 \
+  --can_context_pyramid 1 \
+  --can_use_gffng 1 \
+  --dropout 0.1 \
+  --can_drop_path 0.02 \
+  --learning_rate 0.0005 \
+  --use_norm 0 \
+  --train_epochs 100 \
+  --patience 20 \
+  --des CAN_Heartbeat \
+  --itr 1 \
+  --seed 2 \
+  --num_workers 0
