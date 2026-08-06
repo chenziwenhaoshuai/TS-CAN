@@ -1,0 +1,35 @@
+export CUDA_VISIBLE_DEVICES=0
+
+python -u run.py \
+  --task_name classification \
+  --is_training 1 \
+  --root_path ./dataset/SelfRegulationSCP1/ \
+  --model_id SelfRegulationSCP1 \
+  --model CANPatchTST \
+  --data UEA \
+  --e_layers 2 \
+  --batch_size 4 \
+  --d_model 64 \
+  --d_ff 128 \
+  --patch_len 8 \
+  --can_stride 4 \
+  --can_cls_head flatten \
+  --can_shifts 1,2,4,8,16 \
+  --can_cli_mode full \
+  --can_temporal_cli_mode full \
+  --can_temporal_roll 1 \
+  --can_context_pyramid 1 \
+  --can_use_gffng 1 \
+  --dropout 0.00 \
+  --can_drop_path 0.00 \
+  --learning_rate 0.00078 \
+  --optimizer radam \
+  --weight_decay 0 \
+  --use_norm 0 \
+  --classification_eval_steps 2 \
+  --train_epochs 8 \
+  --patience 4 \
+  --des CAN_SelfRegulationSCP1 \
+  --itr 1 \
+  --seed 2 \
+  --num_workers 0

@@ -95,7 +95,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=32, help='batch size of train input data')
     parser.add_argument('--patience', type=int, default=3, help='early stopping patience')
     parser.add_argument('--learning_rate', type=float, default=0.0001, help='optimizer learning rate')
-    parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'adamw'])
+    parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'adamw', 'radam'])
     parser.add_argument('--weight_decay', type=float, default=0.0)
     parser.add_argument('--warmup_epochs', type=int, default=1)
     parser.add_argument('--weight_averaging', type=str, default='none', choices=['none', 'ema', 'swa', 'ema_swa'])
@@ -147,6 +147,8 @@ if __name__ == '__main__':
                         help='evaluate full test metrics after every epoch and save epoch_test_metrics.csv')
     parser.add_argument('--select_best_by_test_metric', type=str, default='',
                         help='optionally save checkpoint by per-epoch test metric: mse, mae, rmse, mape, or mspe')
+    parser.add_argument('--classification_eval_steps', type=int, default=0,
+                        help='evaluate classification TEST split every N optimizer steps; 0 disables step-level eval')
     parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
 
     # GPU

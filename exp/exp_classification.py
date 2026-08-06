@@ -36,8 +36,39 @@ class Exp_Classification(Exp_Basic):
         return data_set, data_loader
 
     def _select_optimizer(self):
-        # model_optim = optim.Adam(self.model.parameters(), lr=self.args.learning_rate)
-        model_optim = optim.RAdam(self.model.parameters(), lr=self.args.learning_rate)
+        optimizer_name = str(getattr(self.args, 'optimizer', 'radam')).lower()
+        weight_decay = float(getattr(self.args, 'weight_decay', 0.0))
+        active_model = (
+            self.model.module
+            if isinstance(self.model, nn.DataParallel)
+            else self.model
+        )
+        if hasattr(active_model, 'optimizer_param_groups'):
+            parameters = active_model.optimizer_param_groups(
+                self.args.learning_rate
+            )
+        else:
+            parameters = self.model.parameters()
+        if optimizer_name == 'adamw':
+            model_optim = optim.AdamW(
+                parameters,
+                lr=self.args.learning_rate,
+                weight_decay=weight_decay
+            )
+        elif optimizer_name == 'adam':
+            model_optim = optim.Adam(
+                parameters,
+                lr=self.args.learning_rate,
+                weight_decay=weight_decay
+            )
+        elif optimizer_name == 'radam':
+            model_optim = optim.RAdam(
+                parameters,
+                lr=self.args.learning_rate,
+                weight_decay=weight_decay
+            )
+        else:
+            raise ValueError(f'Unsupported optimizer: {optimizer_name}')
         return model_optim
 
     def _select_criterion(self):
@@ -58,7 +89,7 @@ class Exp_Classification(Exp_Basic):
                 outputs = self.model(batch_x, padding_mask, None, None)
 
                 pred = outputs.detach()
-                loss = criterion(pred, label.long().squeeze())
+                loss = criterion(pred, label.long().view(-1))
                 total_loss.append(loss.item())
 
                 preds.append(outputs.detach())
@@ -92,6 +123,9 @@ class Exp_Classification(Exp_Basic):
 
         model_optim = self._select_optimizer()
         criterion = self._select_criterion()
+        eval_steps = max(0, int(getattr(self.args, 'classification_eval_steps', 0)))
+        global_step = 0
+        best_step_accuracy = -float('inf')
 
         for epoch in range(self.args.train_epochs):
             iter_count = 0
@@ -123,6 +157,22 @@ class Exp_Classification(Exp_Basic):
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=4.0)
                 model_optim.step()
+                global_step += 1
+
+                if eval_steps > 0 and global_step % eval_steps == 0:
+                    step_loss, step_accuracy = self.vali(vali_data, vali_loader, criterion)
+                    print(
+                        "Step Eval: step {0}, epoch {1}, batch {2} | Vali Loss: {3:.3f} Vali Acc: {4:.3f}"
+                        .format(global_step, epoch + 1, i + 1, step_loss, step_accuracy)
+                    )
+                    if step_accuracy > best_step_accuracy:
+                        best_step_accuracy = step_accuracy
+                        torch.save(self.model.state_dict(), path + '/' + 'checkpoint.pth')
+                        print(
+                            "Step checkpoint updated at step {0} with acc {1:.6f}"
+                            .format(global_step, step_accuracy)
+                        )
+                    self.model.train()
 
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
             train_loss = np.average(train_loss)
@@ -132,7 +182,25 @@ class Exp_Classification(Exp_Basic):
             print(
                 "Epoch: {0}, Steps: {1} | Train Loss: {2:.3f} Vali Loss: {3:.3f} Vali Acc: {4:.3f} Test Loss: {5:.3f} Test Acc: {6:.3f}"
                 .format(epoch + 1, train_steps, train_loss, vali_loss, val_accuracy, test_loss, test_accuracy))
-            early_stopping(-val_accuracy, self.model, path)
+            if eval_steps > 0:
+                if val_accuracy > best_step_accuracy:
+                    best_step_accuracy = val_accuracy
+                    torch.save(self.model.state_dict(), path + '/' + 'checkpoint.pth')
+                    early_stopping.best_score = best_step_accuracy
+                    early_stopping.counter = 0
+                    print(
+                        "Epoch checkpoint updated with acc {:.6f}"
+                        .format(val_accuracy)
+                    )
+                else:
+                    early_stopping.counter += 1
+                    print(
+                        f'EarlyStopping counter: {early_stopping.counter} out of {early_stopping.patience}'
+                    )
+                    if early_stopping.counter >= early_stopping.patience:
+                        early_stopping.early_stop = True
+            else:
+                early_stopping(-val_accuracy, self.model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
                 break
