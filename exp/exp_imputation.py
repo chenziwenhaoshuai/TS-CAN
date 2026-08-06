@@ -33,8 +33,22 @@ class Exp_Imputation(Exp_Basic):
         return model_optim
 
     def _select_criterion(self):
-        criterion = nn.MSELoss()
-        return criterion
+        loss_name = str(getattr(self.args, 'loss', 'MSE')).lower()
+        if loss_name == 'mae':
+            return nn.L1Loss()
+        if loss_name in ('smoothl1', 'huber'):
+            return nn.SmoothL1Loss(beta=getattr(self.args, 'huber_delta', 1.0))
+        if loss_name in ('msemae', 'mse_mae'):
+            mse_weight = float(getattr(self.args, 'loss_mse_weight', 0.5))
+
+            def criterion(pred, true):
+                return (
+                    mse_weight * nn.functional.mse_loss(pred, true)
+                    + (1.0 - mse_weight) * nn.functional.l1_loss(pred, true)
+                )
+
+            return criterion
+        return nn.MSELoss()
 
     def vali(self, vali_data, vali_loader, criterion):
         total_loss = []

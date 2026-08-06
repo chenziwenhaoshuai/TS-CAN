@@ -1554,8 +1554,10 @@ class Model(nn.Module):
         head_nf = configs.d_model * patch_num
         if self.task_name in ('long_term_forecast', 'short_term_forecast'):
             self.head = FlattenHead(self.enc_in, head_nf, self.pred_len, head_dropout=configs.dropout)
+        elif self.task_name in ('imputation', 'anomaly_detection'):
+            self.head = FlattenHead(self.enc_in, head_nf, self.seq_len, head_dropout=configs.dropout)
         else:
-            raise NotImplementedError('CANPatchTST currently supports forecasting tasks only.')
+            raise NotImplementedError('CANPatchTST currently supports forecasting and imputation tasks only.')
 
         multiscale_patch_lens = parse_int_list(getattr(configs, 'can_multiscale_patch_lens', ''))
         multiscale_patch_lens = [
@@ -1587,7 +1589,7 @@ class Model(nn.Module):
                 FlattenHead(
                     self.enc_in,
                     configs.d_model * scale_patch_num,
-                    self.pred_len,
+                    self.seq_len if self.task_name in ('imputation', 'anomaly_detection') else self.pred_len,
                     head_dropout=configs.dropout
                 )
             )
@@ -1733,6 +1735,98 @@ class Model(nn.Module):
             dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
         return dec_out
 
+    def imputation(self, x_enc, x_mark_enc=None, mask=None):
+        if mask is None:
+            mask = torch.ones_like(x_enc)
+        observed = mask == 1
+        denom = observed.sum(dim=1).clamp_min(1)
+        means = (x_enc * observed).sum(dim=1) / denom
+        means = means.unsqueeze(1).detach()
+        x_enc = x_enc - means
+        x_enc = x_enc.masked_fill(~observed, 0)
+        stdev = torch.sqrt((x_enc * x_enc).sum(dim=1) / denom + 1e-5)
+        stdev = stdev.unsqueeze(1).detach()
+        x_enc = x_enc / stdev
+
+        normalized_x_enc = x_enc
+        variable_context = (
+            self.coarse_var_attention(x_enc)
+            if self.use_coarse_var_attention else None
+        )
+
+        x_enc = x_enc.permute(0, 2, 1)
+        enc_out, n_vars = self.patch_embedding(x_enc)
+        if variable_context is not None:
+            variable_context = variable_context.reshape(-1, self.d_model).unsqueeze(-1)
+            enc_out = enc_out.transpose(1, 2) + variable_context
+            enc_out = enc_out.transpose(1, 2)
+        if self.use_time_mark and x_mark_enc is not None:
+            time_out = self.time_patch_embedding(x_mark_enc)
+            time_out = time_out.repeat_interleave(n_vars, dim=0)
+            enc_out = enc_out + time_out
+        enc_out = enc_out.transpose(1, 2)
+
+        for block in self.blocks:
+            enc_out = block(enc_out)
+        if self.use_deep_periodic_image:
+            if self.training:
+                devices = (
+                    [enc_out.device.index]
+                    if enc_out.is_cuda else []
+                )
+                with torch.random.fork_rng(devices=devices):
+                    enc_out = self.deep_periodic_mixer(enc_out)
+            else:
+                enc_out = self.deep_periodic_mixer(enc_out)
+
+        enc_out = self.final_norm(enc_out.transpose(1, 2)).transpose(1, 2)
+        enc_out = torch.reshape(enc_out, (-1, n_vars, enc_out.shape[1], enc_out.shape[2]))
+        if self.use_variable_embedding:
+            enc_out = enc_out + self.variable_embedding[:, :n_vars]
+        if self.use_cross_var:
+            for block in self.cross_var_blocks:
+                enc_out = block(enc_out)
+            enc_out = self.cross_var_final_norm(
+                enc_out.permute(0, 1, 3, 2)
+            ).permute(0, 1, 3, 2)
+        if self.use_variable_attention:
+            for block in self.variable_attention_blocks:
+                enc_out = block(enc_out)
+            enc_out = self.variable_attention_final_norm(
+                enc_out.permute(0, 1, 3, 2)
+            ).permute(0, 1, 3, 2)
+
+        dec_out = self.head(enc_out).permute(0, 2, 1)
+        if self.multiscale_patch_lens:
+            scale_outputs = [dec_out]
+            for embedding, blocks, norm, head in zip(
+                self.multiscale_embeddings,
+                self.multiscale_blocks,
+                self.multiscale_norms,
+                self.multiscale_heads
+            ):
+                scale_outputs.append(
+                    self.encode_scale(x_enc, embedding, blocks, norm, head)
+                )
+            fusion_weights = torch.softmax(self.multiscale_fusion_logits, dim=0)
+            dec_out = sum(
+                weight * output for weight, output in zip(fusion_weights, scale_outputs)
+            )
+        if self.use_periodic_image:
+            if self.training:
+                devices = (
+                    [normalized_x_enc.device.index]
+                    if normalized_x_enc.is_cuda else []
+                )
+                with torch.random.fork_rng(devices=devices):
+                    dec_out = dec_out + self.periodic_image_refiner(normalized_x_enc)
+            else:
+                dec_out = dec_out + self.periodic_image_refiner(normalized_x_enc)
+
+        dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(1, self.seq_len, 1))
+        dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, self.seq_len, 1))
+        return dec_out
+
     def optimizer_param_groups(self, base_lr):
         if (
             self.gamma_lr_scale == 1.0
@@ -1775,4 +1869,8 @@ class Model(nn.Module):
         if self.task_name in ('long_term_forecast', 'short_term_forecast'):
             dec_out = self.forecast(x_enc, x_mark_enc)
             return dec_out[:, -self.pred_len:, :]
-        raise NotImplementedError('CANPatchTST currently supports forecasting tasks only.')
+        if self.task_name == 'imputation':
+            return self.imputation(x_enc, x_mark_enc, mask)
+        if self.task_name == 'anomaly_detection':
+            return self.imputation(x_enc, x_mark_enc, torch.ones_like(x_enc))
+        raise NotImplementedError('CANPatchTST currently supports forecasting and imputation tasks only.')
