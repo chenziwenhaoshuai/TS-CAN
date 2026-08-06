@@ -83,6 +83,7 @@ class Exp_Anomaly_Detection(Exp_Basic):
 
             self.model.train()
             epoch_time = time.time()
+            stop_training = False
             for i, (batch_x, batch_y) in enumerate(train_loader):
                 iter_count += 1
                 model_optim.zero_grad()
@@ -106,6 +107,10 @@ class Exp_Anomaly_Detection(Exp_Basic):
 
                 loss.backward()
                 model_optim.step()
+                if getattr(self.args, 'max_train_steps', 0) > 0 and (i + 1) >= self.args.max_train_steps:
+                    print("Reached max_train_steps: {}".format(self.args.max_train_steps))
+                    stop_training = True
+                    break
 
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
             train_loss = np.average(train_loss)
@@ -117,6 +122,8 @@ class Exp_Anomaly_Detection(Exp_Basic):
             early_stopping(vali_loss, self.model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
+                break
+            if stop_training:
                 break
             adjust_learning_rate(model_optim, epoch + 1, self.args)
 
