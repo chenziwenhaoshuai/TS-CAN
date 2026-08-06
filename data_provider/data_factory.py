@@ -31,11 +31,16 @@ def data_provider(args, flag):
 
     if args.task_name == 'anomaly_detection':
         drop_last = False
+        kwargs = {}
+        anomaly_train_stride = int(getattr(args, 'anomaly_train_stride', 0))
+        if anomaly_train_stride > 0 and flag in ['train', 'val']:
+            kwargs['step'] = anomaly_train_stride
         data_set = Data(
             args = args,
             root_path=args.root_path,
             win_size=args.seq_len,
             flag=flag,
+            **kwargs,
         )
         print(flag, len(data_set))
         data_loader = DataLoader(

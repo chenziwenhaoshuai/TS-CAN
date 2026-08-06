@@ -42,6 +42,8 @@ if __name__ == '__main__':
 
     # anomaly detection task
     parser.add_argument('--anomaly_ratio', type=float, default=0.25, help='prior anomaly ratio (%%)')
+    parser.add_argument('--anomaly_train_stride', type=int, default=0,
+                        help='window stride for anomaly train/val loaders; 0 keeps the dataset default')
 
     # model define
     parser.add_argument('--expand', type=int, default=2, help='expansion factor for Mamba')
