@@ -42,6 +42,11 @@ if __name__ == '__main__':
 
     # anomaly detection task
     parser.add_argument('--anomaly_ratio', type=float, default=0.25, help='prior anomaly ratio (%%)')
+    parser.add_argument('--anomaly_score_mode', type=str, default='mean',
+                        choices=['mean', 'max', 'topk_mean'],
+                        help='aggregate per-variable reconstruction errors into anomaly scores')
+    parser.add_argument('--anomaly_score_top_k', type=int, default=3,
+                        help='number of largest variable errors used by topk_mean anomaly scoring')
     parser.add_argument('--anomaly_train_stride', type=int, default=0,
                         help='window stride for anomaly train/val loaders; 0 keeps the dataset default')
 

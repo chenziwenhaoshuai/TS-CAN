@@ -1,0 +1,39 @@
+export CUDA_VISIBLE_DEVICES=0
+
+python -u run.py \
+  --task_name anomaly_detection \
+  --is_training 1 \
+  --root_path ./dataset/MSL \
+  --model_id MSL_CAN_seq30_s110_r05175_max \
+  --model CANPatchTST \
+  --data MSL \
+  --features M \
+  --seq_len 30 \
+  --pred_len 0 \
+  --enc_in 55 \
+  --c_out 55 \
+  --e_layers 2 \
+  --d_model 64 \
+  --d_ff 64 \
+  --patch_len 8 \
+  --can_stride 4 \
+  --can_shifts 1,2,4,8,16 \
+  --can_cli_mode full \
+  --can_temporal_cli_mode full \
+  --can_temporal_roll 1 \
+  --can_context_pyramid 1 \
+  --can_use_gffng 1 \
+  --can_drop_path 0.0 \
+  --dropout 0.0 \
+  --anomaly_ratio 0.5175 \
+  --anomaly_score_mode max \
+  --batch_size 64 \
+  --learning_rate 0.001 \
+  --lradj cosine \
+  --train_epochs 1 \
+  --patience 1 \
+  --max_train_steps 110 \
+  --use_amp \
+  --seed 2 \
+  --num_workers 0 \
+  --des CAN_MSL

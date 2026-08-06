@@ -40,6 +40,19 @@ class Exp_Anomaly_Detection(Exp_Basic):
         criterion = nn.MSELoss()
         return criterion
 
+    def _anomaly_score(self, batch_x, outputs):
+        errors = self.anomaly_criterion(batch_x, outputs)
+        mode = getattr(self.args, 'anomaly_score_mode', 'mean')
+        if mode == 'mean':
+            return torch.mean(errors, dim=-1)
+        if mode == 'max':
+            return torch.max(errors, dim=-1).values
+        if mode == 'topk_mean':
+            top_k = int(getattr(self.args, 'anomaly_score_top_k', 3))
+            top_k = max(1, min(top_k, errors.shape[-1]))
+            return torch.topk(errors, top_k, dim=-1).values.mean(dim=-1)
+        raise ValueError(f'Unsupported anomaly_score_mode: {mode}')
+
     def vali(self, vali_data, vali_loader, criterion):
         total_loss = []
         self.model.eval()
@@ -154,7 +167,7 @@ class Exp_Anomaly_Detection(Exp_Basic):
                 # reconstruction
                 outputs = self.model(batch_x, None, None, None)
                 # criterion
-                score = torch.mean(self.anomaly_criterion(batch_x, outputs), dim=-1)
+                score = self._anomaly_score(batch_x, outputs)
                 score = score.detach().cpu().numpy()
                 attens_energy.append(score)
 
@@ -169,7 +182,7 @@ class Exp_Anomaly_Detection(Exp_Basic):
             # reconstruction
             outputs = self.model(batch_x, None, None, None)
             # criterion
-            score = torch.mean(self.anomaly_criterion(batch_x, outputs), dim=-1)
+            score = self._anomaly_score(batch_x, outputs)
             score = score.detach().cpu().numpy()
             attens_energy.append(score)
             test_labels.append(batch_y)
