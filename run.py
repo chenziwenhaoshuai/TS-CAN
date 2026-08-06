@@ -268,6 +268,8 @@ if __name__ == '__main__':
     parser.add_argument('--can_multiscale_patch_lens', type=str, default='', help='CAN multiscale patch lengths')
     parser.add_argument('--can_multiscale_stride_ratio', type=float, default=0.5, help='CAN multiscale stride ratio')
     parser.add_argument('--can_multiscale_main_bias', type=float, default=0.0, help='CAN multiscale main branch bias')
+    parser.add_argument('--can_cls_head', type=str, default='flatten', choices=['flatten', 'pool', 'var_pool'],
+                        help='CAN classification head')
 
     # GCN
     parser.add_argument('--node_dim', type=int, default=10, help='each node embbed to dim dimentions')

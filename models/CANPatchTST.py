@@ -1556,8 +1556,22 @@ class Model(nn.Module):
             self.head = FlattenHead(self.enc_in, head_nf, self.pred_len, head_dropout=configs.dropout)
         elif self.task_name in ('imputation', 'anomaly_detection'):
             self.head = FlattenHead(self.enc_in, head_nf, self.seq_len, head_dropout=configs.dropout)
+        elif self.task_name == 'classification':
+            self.classification_head_type = getattr(configs, 'can_cls_head', 'flatten')
+            self.flatten = nn.Flatten(start_dim=-2)
+            self.dropout = nn.Dropout(configs.dropout)
+            if self.classification_head_type == 'flatten':
+                self.projection = nn.Linear(head_nf * self.enc_in, configs.num_class)
+            elif self.classification_head_type == 'pool':
+                self.projection = nn.Linear(configs.d_model * self.enc_in, configs.num_class)
+            elif self.classification_head_type == 'var_pool':
+                self.projection = nn.Linear(configs.d_model, configs.num_class)
+            else:
+                raise ValueError(f'Invalid CAN classification head: {self.classification_head_type}')
         else:
-            raise NotImplementedError('CANPatchTST currently supports forecasting and imputation tasks only.')
+            raise NotImplementedError(
+                'CANPatchTST currently supports forecasting, imputation, anomaly detection, and classification tasks.'
+            )
 
         multiscale_patch_lens = parse_int_list(getattr(configs, 'can_multiscale_patch_lens', ''))
         multiscale_patch_lens = [
@@ -1608,6 +1622,55 @@ class Model(nn.Module):
         enc_out = final_norm(enc_out.transpose(1, 2)).transpose(1, 2)
         enc_out = torch.reshape(enc_out, (-1, n_vars, enc_out.shape[1], enc_out.shape[2]))
         return head(enc_out).permute(0, 2, 1)
+
+    def encode_features(self, x_enc, x_mark_enc=None):
+        variable_context = (
+            self.coarse_var_attention(x_enc)
+            if self.use_coarse_var_attention else None
+        )
+
+        x_enc = x_enc.permute(0, 2, 1)
+        enc_out, n_vars = self.patch_embedding(x_enc)
+        if variable_context is not None:
+            variable_context = variable_context.reshape(-1, self.d_model).unsqueeze(-1)
+            enc_out = enc_out.transpose(1, 2) + variable_context
+            enc_out = enc_out.transpose(1, 2)
+        if self.use_time_mark and x_mark_enc is not None:
+            time_out = self.time_patch_embedding(x_mark_enc)
+            time_out = time_out.repeat_interleave(n_vars, dim=0)
+            enc_out = enc_out + time_out
+        enc_out = enc_out.transpose(1, 2)
+
+        for block in self.blocks:
+            enc_out = block(enc_out)
+        if self.use_deep_periodic_image:
+            if self.training:
+                devices = (
+                    [enc_out.device.index]
+                    if enc_out.is_cuda else []
+                )
+                with torch.random.fork_rng(devices=devices):
+                    enc_out = self.deep_periodic_mixer(enc_out)
+            else:
+                enc_out = self.deep_periodic_mixer(enc_out)
+
+        enc_out = self.final_norm(enc_out.transpose(1, 2)).transpose(1, 2)
+        enc_out = torch.reshape(enc_out, (-1, n_vars, enc_out.shape[1], enc_out.shape[2]))
+        if self.use_variable_embedding:
+            enc_out = enc_out + self.variable_embedding[:, :n_vars]
+        if self.use_cross_var:
+            for block in self.cross_var_blocks:
+                enc_out = block(enc_out)
+            enc_out = self.cross_var_final_norm(
+                enc_out.permute(0, 1, 3, 2)
+            ).permute(0, 1, 3, 2)
+        if self.use_variable_attention:
+            for block in self.variable_attention_blocks:
+                enc_out = block(enc_out)
+            enc_out = self.variable_attention_final_norm(
+                enc_out.permute(0, 1, 3, 2)
+            ).permute(0, 1, 3, 2)
+        return enc_out
 
     def forecast(self, x_enc, x_mark_enc=None):
         if self.use_norm:
@@ -1827,6 +1890,37 @@ class Model(nn.Module):
         dec_out = dec_out + (means[:, 0, :].unsqueeze(1).repeat(1, self.seq_len, 1))
         return dec_out
 
+    def classification(self, x_enc, padding_mask=None):
+        if padding_mask is not None:
+            x_enc = x_enc * padding_mask.unsqueeze(-1)
+        if self.use_norm:
+            if padding_mask is not None:
+                observed = padding_mask.unsqueeze(-1)
+                denom = observed.sum(dim=1, keepdim=True).clamp_min(1.0)
+                means = (x_enc * observed).sum(dim=1, keepdim=True).detach() / denom
+                x_centered = (x_enc - means) * observed
+                stdev = torch.sqrt((x_centered * x_centered).sum(dim=1, keepdim=True) / denom + 1e-5)
+                x_enc = x_centered / stdev
+            else:
+                means = x_enc.mean(1, keepdim=True).detach()
+                x_enc = x_enc - means
+                stdev = torch.sqrt(torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
+                x_enc = x_enc / stdev
+
+        enc_out = self.encode_features(x_enc, None)
+        if self.classification_head_type == 'flatten':
+            output = self.flatten(enc_out)
+            output = self.dropout(output)
+            output = output.reshape(output.shape[0], -1)
+        elif self.classification_head_type == 'pool':
+            output = enc_out.mean(dim=-1)
+            output = self.dropout(output)
+            output = output.reshape(output.shape[0], -1)
+        else:
+            output = enc_out.mean(dim=(1, 3))
+            output = self.dropout(output)
+        return self.projection(output)
+
     def optimizer_param_groups(self, base_lr):
         if (
             self.gamma_lr_scale == 1.0
@@ -1873,4 +1967,8 @@ class Model(nn.Module):
             return self.imputation(x_enc, x_mark_enc, mask)
         if self.task_name == 'anomaly_detection':
             return self.imputation(x_enc, x_mark_enc, torch.ones_like(x_enc))
-        raise NotImplementedError('CANPatchTST currently supports forecasting and imputation tasks only.')
+        if self.task_name == 'classification':
+            return self.classification(x_enc, x_mark_enc)
+        raise NotImplementedError(
+            'CANPatchTST currently supports forecasting, imputation, anomaly detection, and classification tasks.'
+        )
