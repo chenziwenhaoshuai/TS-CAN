@@ -11,6 +11,7 @@
   <img src="https://img.shields.io/badge/PyTorch-CUDA-ee4c2c?logo=pytorch&logoColor=white" alt="PyTorch CUDA" />
   <img src="https://img.shields.io/badge/长期预测-29%2F32%20MSE%20胜-blue" alt="长期预测 29/32 MSE 胜" />
   <img src="https://img.shields.io/badge/短期预测-6%2F6%202--of--3%20胜-f59e0b" alt="短期预测 6/6 胜" />
+  <img src="https://img.shields.io/badge/异常检测-5%2F5%20F1%20胜-dc2626" alt="异常检测 5/5 F1 胜" />
 </p>
 
 <p>
@@ -204,11 +205,21 @@ bash scripts/short_term_forecast/CANPatchTST_PEMS.sh
 
 M4 使用 TSLib 的 `short_term_forecast` 任务。PEMS 对应 TimeMixer++ 短期预测表格协议，但在代码中通过固定预测长度 `pred_len=12` 的 `long_term_forecast` runner 执行。
 
+### 异常检测 🚨
+
+```bash
+bash scripts/anomaly_detection/SMD/CANPatchTST.sh
+bash scripts/anomaly_detection/MSL/CANPatchTST.sh
+bash scripts/anomaly_detection/SMAP/CANPatchTST.sh
+bash scripts/anomaly_detection/SWAT/CANPatchTST.sh
+bash scripts/anomaly_detection/PSM/CANPatchTST.sh
+```
+
 <a id="results"></a>
 
 ## 实验结果 🏆
 
-长期预测报告 `MSE/MAE`。M4 短期预测报告 `SMAPE/MASE/OWA`。PEMS 报告 `MAE/MAPE/RMSE`。所有指标越低越好。
+长期预测报告 `MSE/MAE`。M4 短期预测报告 `SMAPE/MASE/OWA`。PEMS 报告 `MAE/MAPE/RMSE`，这些预测指标越低越好。异常检测报告 `Precision/Recall/F1`，越高越好。
 
 ### 长期预测与 TimeMixer++ 对比 📊
 
@@ -342,9 +353,15 @@ TS-CAN/
 │   ├── Exchange_script/CANPatchTST_Exchange.sh
 │   ├── Traffic_script/CANPatchTST_Traffic.sh
 │   └── Weather_script/CANPatchTST_Weather.sh
-└── scripts/short_term_forecast/
+├── scripts/short_term_forecast/
     ├── CANPatchTST_M4.sh
     └── CANPatchTST_PEMS.sh
+└── scripts/anomaly_detection/
+    ├── SMD/CANPatchTST.sh
+    ├── MSL/CANPatchTST.sh
+    ├── SMAP/CANPatchTST.sh
+    ├── SWAT/CANPatchTST.sh
+    └── PSM/CANPatchTST.sh
 ```
 
 ## 引用 📚

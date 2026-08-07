@@ -11,6 +11,7 @@
   <img src="https://img.shields.io/badge/PyTorch-CUDA-ee4c2c?logo=pytorch&logoColor=white" alt="PyTorch CUDA" />
   <img src="https://img.shields.io/badge/Long--term-29%2F32%20MSE%20wins-blue" alt="Long-term 29/32 MSE wins" />
   <img src="https://img.shields.io/badge/Short--term-6%2F6%202--of--3%20wins-f59e0b" alt="Short-term 6/6 wins" />
+  <img src="https://img.shields.io/badge/Anomaly-5%2F5%20F1%20wins-dc2626" alt="Anomaly 5/5 F1 wins" />
 </p>
 
 <p>
@@ -227,12 +228,24 @@ M4 uses TSLib's `short_term_forecast` task. PEMS follows the TimeMixer++
 short-term table protocol, but is executed through the fixed-horizon
 `long_term_forecast` runner with `pred_len=12`.
 
+### Anomaly detection 🚨
+
+```bash
+bash scripts/anomaly_detection/SMD/CANPatchTST.sh
+bash scripts/anomaly_detection/MSL/CANPatchTST.sh
+bash scripts/anomaly_detection/SMAP/CANPatchTST.sh
+bash scripts/anomaly_detection/SWAT/CANPatchTST.sh
+bash scripts/anomaly_detection/PSM/CANPatchTST.sh
+```
+
 <a id="results"></a>
 
 ## Results 🏆
 
 Long-term forecasting reports `MSE/MAE`. Short-term M4 reports
-`SMAPE/MASE/OWA`. PEMS reports `MAE/MAPE/RMSE`. Lower is better.
+`SMAPE/MASE/OWA`. PEMS reports `MAE/MAPE/RMSE`. Lower is better for these
+forecasting metrics. Anomaly detection reports `Precision/Recall/F1`, where
+higher is better.
 
 ### Long-term forecasting vs TimeMixer++ 📊
 
@@ -373,9 +386,15 @@ TS-CAN/
 │   ├── Exchange_script/CANPatchTST_Exchange.sh
 │   ├── Traffic_script/CANPatchTST_Traffic.sh
 │   └── Weather_script/CANPatchTST_Weather.sh
-└── scripts/short_term_forecast/
+├── scripts/short_term_forecast/
     ├── CANPatchTST_M4.sh
     └── CANPatchTST_PEMS.sh
+└── scripts/anomaly_detection/
+    ├── SMD/CANPatchTST.sh
+    ├── MSL/CANPatchTST.sh
+    ├── SMAP/CANPatchTST.sh
+    ├── SWAT/CANPatchTST.sh
+    └── PSM/CANPatchTST.sh
 ```
 
 ## Citation 📚
